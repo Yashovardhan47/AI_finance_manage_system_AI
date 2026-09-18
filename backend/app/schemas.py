@@ -79,6 +79,11 @@ class BillRead(ORMModel):
     status: str
     autopay_enabled: bool
     provider_reference: str | None
+    provider_connection_id: int | None
+    external_obligation_id: str | None
+    external_status: str
+    sync_status: str
+    service_action: str
 
 
 class PaymentPrepare(BaseModel):
@@ -96,6 +101,8 @@ class PaymentRead(ORMModel):
     status: str
     checkout_url: str | None
     failure_reason: str | None
+    provider_sync_status: str
+    provider_confirmation_id: str | None
     created_at: datetime
     completed_at: datetime | None
 
@@ -125,3 +132,45 @@ class UserPreferencesUpdate(BaseModel):
     monthly_income: Decimal | None = Field(default=None, ge=0)
     minimum_balance: Decimal | None = Field(default=None, ge=0)
 
+
+class ProviderConnectionCreate(BaseModel):
+    provider_slug: str = Field(min_length=2, max_length=80)
+    external_customer_id: str = Field(min_length=3, max_length=180)
+    display_name: str | None = Field(default=None, max_length=120)
+
+
+class ProviderConnectionRead(ORMModel):
+    id: int
+    provider_slug: str
+    provider_name: str
+    category: str
+    external_customer_id: str
+    display_name: str
+    connection_type: str
+    status: str
+    capabilities: list[str]
+    provider_state: dict
+    last_synced_at: datetime | None
+    created_at: datetime
+
+
+class MarketplaceInteractionCreate(BaseModel):
+    app_slug: str = Field(min_length=2, max_length=80)
+    plan_id: str | None = Field(default=None, max_length=80)
+    action: str = Field(pattern="^(viewed|shortlisted|dismissed|subscribe_intent|subscribed|cancelled)$")
+    context: dict = Field(default_factory=dict)
+
+
+class MarketplaceInteractionRead(ORMModel):
+    id: int
+    app_slug: str
+    plan_id: str | None
+    action: str
+    context: dict
+    created_at: datetime
+
+
+class SubscriptionIntentCreate(BaseModel):
+    app_slug: str = Field(min_length=2, max_length=80)
+    plan_id: str = Field(min_length=1, max_length=80)
+    override_warning_acknowledged: bool = False

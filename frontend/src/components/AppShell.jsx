@@ -2,7 +2,9 @@ import Brand from './Brand'
 
 const navItems = [
   ['overview', '⌂', 'Overview'],
+  ['browse', '◎', 'Browse apps'],
   ['bills', '▣', 'Bills & pay'],
+  ['connections', '⇄', 'Connected apps'],
   ['intelligence', '✦', 'SafePay AI'],
   ['activity', '↻', 'Activity'],
 ]
@@ -35,4 +37,3 @@ export default function AppShell({ user, page, setPage, onLogout, children }) {
     </div>
   )
 }
-

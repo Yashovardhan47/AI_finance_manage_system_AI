@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.database import get_db
-from app.models import Bill, FinancialAccount, Payment, Transaction, User
+from app.models import Bill, FinancialAccount, Payment, ProviderConnection, Transaction, User
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -18,6 +18,12 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
     accounts = list(db.scalars(select(FinancialAccount).where(FinancialAccount.user_id == user.id, FinancialAccount.is_active.is_(True))))
     bills = list(db.scalars(select(Bill).where(Bill.user_id == user.id).order_by(Bill.due_date)))
     payments = list(db.scalars(select(Payment).where(Payment.user_id == user.id).order_by(Payment.created_at.desc()).limit(5)))
+    connected_providers = db.scalar(
+        select(func.count(ProviderConnection.id)).where(
+            ProviderConnection.user_id == user.id,
+            ProviderConnection.status == "connected",
+        )
+    ) or 0
     today = date.today()
     upcoming = [bill for bill in bills if bill.status in {"due", "scheduled", "overdue"} and bill.due_date <= today + timedelta(days=30)]
     total_balance = sum((account.balance for account in accounts), Decimal("0"))
@@ -36,6 +42,7 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
         "upcoming_30_days": float(upcoming_total),
         "spent_this_month": float(spent or 0),
         "active_accounts": len(accounts),
+        "connected_providers": connected_providers,
         "unpaid_bills": len(upcoming),
         "upcoming_bills": [
             {
@@ -46,6 +53,8 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
                 "amount": float(bill.amount),
                 "due_date": bill.due_date.isoformat(),
                 "status": bill.status,
+                "external_status": bill.external_status,
+                "sync_status": bill.sync_status,
             }
             for bill in upcoming[:6]
         ],
@@ -59,4 +68,3 @@ def dashboard_summary(user: User = Depends(get_current_user), db: Session = Depe
             for payment in payments
         ],
     }
-

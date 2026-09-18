@@ -33,8 +33,11 @@ export default function Bills() {
     setPrepared(result)
   }
   const confirm = async () => {
-    await api(`/payments/${prepared.id}/confirm`, { method: 'POST' })
-    setMessage(`${paying.name} was paid in sandbox mode.`); setReceiptId(prepared.id); setPaying(null); setPrepared(null); await load()
+    const result = await api(`/payments/${prepared.id}/confirm`, { method: 'POST' })
+    const providerUpdate = result.provider_sync_status === 'confirmed'
+      ? ` The provider confirmed ${result.provider_confirmation_id}; its account state is synchronized.`
+      : ''
+    setMessage(`${paying.name} was paid in sandbox mode.${providerUpdate}`); setReceiptId(prepared.id); setPaying(null); setPrepared(null); await load()
   }
   const closePay = () => { setPaying(null); setPrepared(null) }
 
@@ -47,7 +50,7 @@ export default function Bills() {
         <div className="table-head"><span>Bill</span><span>Category</span><span>Due date</span><span>Amount</span><span>Status</span><span /></div>
         {bills.length ? bills.map((bill) => (
           <div className="table-row" key={bill.id}>
-            <div><span className={`category-icon ${bill.category}`}>{categoryIcon(bill.category)}</span><section><b>{bill.name}</b><small>{bill.biller}</small></section></div>
+            <div><span className={`category-icon ${bill.category}`}>{categoryIcon(bill.category)}</span><section><b>{bill.name}</b><small>{bill.biller}{bill.provider_connection_id ? ` · provider ${bill.external_status}` : ' · local bill'}</small></section></div>
             <span className="category-label">{bill.category}</span><span>{formatDate(bill.due_date)}</span><strong>{formatMoney(bill.amount)}</strong><span className={`status ${bill.status}`}>{bill.status}</span>
             <button className="button compact" disabled={bill.status === 'paid'} onClick={() => { setPaying(bill); setPrepared(null) }}>{bill.status === 'paid' ? 'Paid' : 'Pay securely'}</button>
           </div>

@@ -38,7 +38,7 @@ export default function Overview({ user, onNavigate }) {
       <div className="page-title"><div><span className="eyebrow">Friday financial briefing</span><h1>Good morning, {user.full_name.split(' ')[0]}.</h1><p>Here is what your money needs from you today.</p></div>{!hasData && <button className="button primary" onClick={seed}>Load secure demo data</button>}</div>
       {message && <div className="notice">{message}</div>}
       <div className="metric-grid">
-        <Metric label="Available balance" value={formatMoney(summary.total_balance)} meta={`${summary.active_accounts} connected accounts`} tone="mint" />
+        <Metric label="Available balance" value={formatMoney(summary.total_balance)} meta={`${summary.active_accounts} money accounts · ${summary.connected_providers} provider apps`} tone="mint" />
         <Metric label="Bills due in 30 days" value={formatMoney(summary.upcoming_30_days)} meta={`${summary.unpaid_bills} upcoming obligations`} />
         <Metric label="Spent this month" value={formatMoney(summary.spent_this_month)} meta="Posted transactions" />
         <Metric label="Financial health" value={`${health.score}/100`} meta={health.label} tone={health.score >= 60 ? 'mint' : 'amber'} />
@@ -73,4 +73,3 @@ function Metric({ label, value, meta, tone = '' }) { return <div className={`met
 function EmptyMini({ text }) { return <div className="mini-empty">{text}</div> }
 function categoryIcon(category) { return ({ utility: '⚡', subscription: '▶', emi: '₹', insurance: '◆', recharge: '↗', rent: '⌂', education: '◫' })[category] || '•' }
 function PageSkeleton() { return <div className="page"><div className="skeleton title-skeleton" /><div className="metric-grid">{[1,2,3,4].map((x) => <div className="skeleton metric-card" key={x} />)}</div><div className="skeleton large-skeleton" /></div> }
-

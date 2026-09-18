@@ -8,7 +8,13 @@ export async function api(path, options = {}) {
   })
   if (response.status === 204) return null
   const payload = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(payload.detail || 'Something went wrong')
+  if (!response.ok) {
+    const detail = payload.detail
+    const error = new Error(typeof detail === 'string' ? detail : detail?.message || 'Something went wrong')
+    error.detail = detail
+    error.status = response.status
+    throw error
+  }
   return payload
 }
 

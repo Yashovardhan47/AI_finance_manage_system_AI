@@ -28,6 +28,7 @@ def build_payment_receipt(payment: Payment) -> BytesIO:
         ("Biller", payment.bill.biller),
         ("Funding source", f"{payment.account.name} {payment.account.masked_identifier}"),
         ("Provider", payment.provider.title()),
+        ("External confirmation", payment.provider_confirmation_id or "Local payment"),
         ("Status", payment.status.title()),
         ("Completed", payment.completed_at.isoformat() if payment.completed_at else "Pending"),
     ]
@@ -53,4 +54,3 @@ def build_payment_receipt(payment: Payment) -> BytesIO:
     canvas.save()
     stream.seek(0)
     return stream
-

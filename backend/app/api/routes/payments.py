@@ -11,6 +11,7 @@ from app.models import Bill, FinancialAccount, Payment, Transaction, User
 from app.schemas import PaymentPrepare, PaymentRead
 from app.services.audit import write_audit
 from app.services.payment_provider import get_payment_provider
+from app.services.provider_connectors import settle_external_provider
 from app.services.receipt import build_payment_receipt
 
 
@@ -46,6 +47,7 @@ def prepare_payment(
         amount=bill.amount,
         idempotency_key=payload.idempotency_key,
         status="requires_authorization",
+        provider_sync_status="awaiting_payment" if bill.provider_connection_id else "not_required",
     )
     db.add(payment)
     db.flush()
@@ -128,7 +130,20 @@ def confirm_sandbox_payment(
             status="posted",
         )
     )
-    write_audit(db, user_id=user.id, action="payment.succeeded", entity_type="payment", entity_id=payment.id, detail={"provider": "sandbox"})
+    provider_result = settle_external_provider(db, payment)
+    write_audit(
+        db,
+        user_id=user.id,
+        action="payment.succeeded",
+        entity_type="payment",
+        entity_id=payment.id,
+        detail={
+            "payment_provider": "sandbox",
+            "external_provider_updated": bool(provider_result),
+            "external_result": provider_result["result_action"] if provider_result else None,
+            "provider_confirmation_id": provider_result["confirmation_id"] if provider_result else None,
+        },
+    )
     db.commit()
     db.refresh(payment)
     return payment
