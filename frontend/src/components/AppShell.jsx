@@ -4,6 +4,7 @@ const navItems = [
   ['overview', '⌂', 'Overview'],
   ['browse', '◎', 'Browse apps'],
   ['bills', '▣', 'Bills & pay'],
+  ['billing', '◫', 'Billing ops'],
   ['connections', '⇄', 'Connected apps'],
   ['intelligence', '✦', 'SafePay AI'],
   ['activity', '↻', 'Activity'],

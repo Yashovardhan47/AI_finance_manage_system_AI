@@ -13,14 +13,15 @@ settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    Base.metadata.create_all(bind=engine)
+    if settings.auto_create_schema:
+        Base.metadata.create_all(bind=engine)
     yield
 
 
 app = FastAPI(
     title=settings.app_name,
-    version="0.1.0",
-    description="AI-assisted personal finance and secure bill-payment orchestration.",
+    version="1.0.0",
+    description="AI-assisted personal finance, bill-payment orchestration, and production-style subscription billing operations.",
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -46,4 +47,3 @@ def root() -> dict:
 @app.get("/health")
 def health() -> dict:
     return {"status": "healthy", "environment": settings.environment}
-

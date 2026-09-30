@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.routes import auth, dashboard, finance, integrations, intelligence, marketplace, payments, system
+from app.api.routes import auth, billing, dashboard, finance, integrations, intelligence, marketplace, payments, system
 
 
 api_router = APIRouter()
@@ -12,3 +12,4 @@ api_router.include_router(integrations.router)
 api_router.include_router(marketplace.router)
 api_router.include_router(intelligence.router)
 api_router.include_router(system.router)
+api_router.include_router(billing.router)
