@@ -13,6 +13,17 @@ services:
       timeout: 5s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: ./backend
     environment:
@@ -20,10 +31,53 @@ services:
       JWT_SECRET: local-docker-secret-change-before-deployment
       FRONTEND_URL: http://localhost:5173
       CORS_ORIGINS: http://localhost:5173
+      AUTO_CREATE_SCHEMA: "false"
+      BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
     ports:
       - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: celery -A app.celery_app.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://billflow:billflow_dev@postgres:5432/billflow
+      JWT_SECRET: local-docker-secret-change-before-deployment
+      BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AUTO_CREATE_SCHEMA: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build: ./backend
+    command: celery -A app.celery_app.celery_app beat --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://billflow:billflow_dev@postgres:5432/billflow
+      JWT_SECRET: local-docker-secret-change-before-deployment
+      BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      AUTO_CREATE_SCHEMA: "false"
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   frontend:
@@ -34,8 +88,9 @@ services:
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   postgres_data:
-
+  redis_data:

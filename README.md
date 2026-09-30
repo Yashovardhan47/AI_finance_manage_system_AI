@@ -19,7 +19,7 @@ Most finance dashboards describe past transactions. BillFlow AI turns future obl
 
 The research direction is an **Explainable Multi-Objective Payment Orchestration System Under Cash-Flow Uncertainty**. A publishable evaluation would compare SafePay against due-date-only, earliest-payment and reward-only baselines using late-payment rate, reserve violations, failed payments, saved fees/rewards and explanation usefulness.
 
-## Current working vertical slice
+## Implemented application
 
 - Animated, responsive landing page with registration-first onboarding
 - Email/password JWT authentication and optional Google OAuth
@@ -40,26 +40,29 @@ The research direction is an **Explainable Multi-Objective Payment Orchestration
 - 7–90 day cash-flow forecast
 - Financial-health score with visible component breakdown
 - Explainable SafePay plan and robust anomaly flags
-- Demo data generator, API documentation and automated tests
-- SQLite for instant local development; PostgreSQL through Docker Compose
+- A separate **Billing Operations** control plane for plans, customers, subscriptions, invoices, collections and compliance
+- Trial, active, paused, past-due and cancelled lifecycle rules with immediate or period-end plan changes and cancellation
+- Idempotent renewal cycles, metered usage, proration credits/debits and unique itemized invoices
+- Country/region tax rules, branded persisted invoice PDFs and bounded refunds
+- Signed mock-gateway webhooks with replay protection and day 1/3/7 payment recovery
+- MRR, churn, conversion, revenue, invoice-status and recovery analytics in a responsive Recharts dashboard
+- Customer-scoped audit history and durable notification outbox
+- PostgreSQL schema managed by Alembic, Redis-backed Celery worker and Beat schedules, plus SQLite for instant development
+- Deterministic demo portfolios, OpenAPI documentation, integration tests, browser E2E coverage and a Locust profile
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    UI[React + Vite interface] --> API[FastAPI REST API]
+    UI[React + Vite + Recharts] --> API[FastAPI + OpenAPI + JWT]
     API --> DB[(PostgreSQL / SQLite)]
-    API --> AI[SafePay Intelligence Engine]
-    AI --> F[Cash-flow forecast]
-    AI --> P[Constraint planner]
-    AI --> A[Anomaly detector]
-    API --> PAY[Payment provider adapter]
-    API --> MKT[Subscription marketplace]
-    MKT --> AI
-    PAY --> AUTH[User PIN / OTP / biometric approval]
-    API --> CON[Official provider connector]
-    CON --> EXT[Home / health / entertainment account]
-    EXT --> API
+    API --> AI[SafePay intelligence]
+    API --> BILL[Billing engine]
+    BILL --> GATE[Signed gateway events]
+    BILL --> PDF[Invoice PDF engine]
+    BEAT[Celery Beat] --> REDIS[(Redis)] --> WORKER[Celery worker]
+    WORKER --> DB
+    API --> CON[Provider connectors]
 ```
 
 The repository currently uses a sandbox provider. Production connectors must use each provider's supported OAuth/API flow. BillFlow must never store bank passwords, UPI PINs, OTPs or biometric secrets.
@@ -100,6 +103,7 @@ py -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 Copy-Item .env.example .env
+alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -117,18 +121,42 @@ npm run dev
 
 Open `http://localhost:5173`, register, and choose **Load secure demo data** on the dashboard. Open **Browse apps** to compare plans and inspect the personalized recommendation, or **Connected apps** to inspect imported provider states. Choosing a subscription creates a bill; paying it from **Bills & pay** activates the exact sandbox plan and records its provider confirmation.
 
+Open **Billing operations** and choose **Load realistic demo data** to inspect the complete recurring-billing scenario: catalog, customer accounts, lifecycle controls, invoices and PDFs, payment failure/recovery, tax summaries, analytics and audit evidence.
+
 ### Docker alternative
 
 ```powershell
 docker compose up --build
 ```
 
+Docker starts PostgreSQL, Redis, the API, Celery worker, Beat scheduler and the production frontend. It applies the Alembic migration before background services become healthy.
+
 ### Tests
 
 ```powershell
 cd backend
+pip install -r requirements-dev.txt
+python -m compileall -q app
 pytest -q
+
+cd ..\frontend
+npm ci
+npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
+
+The measured local Locust profile and its limits are recorded in [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md).
+
+## Project evidence
+
+- [`docs/REQUIREMENTS_TRACEABILITY.md`](docs/REQUIREMENTS_TRACEABILITY.md) — every weekly requirement mapped to code, UI and tests
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ERD.md`](docs/ERD.md) — runtime design and billing data model
+- [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) — billing endpoint guide; interactive OpenAPI remains at `/docs`
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and [`docs/TESTING.md`](docs/TESTING.md) — operating and verification procedures
+- [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — end-to-end walkthrough
+- [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) — explicit production boundaries
+- [`docs/BillFlow_AI_Final_Presentation.pptx`](docs/BillFlow_AI_Final_Presentation.pptx) — final 12-slide project presentation
 
 ## Google OAuth
 
@@ -140,9 +168,11 @@ http://localhost:8000/api/v1/auth/google/callback
 
 Then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`. Google identity is exchanged for BillFlow's own authenticated session; it does not grant access to unrelated financial providers.
 
-## Production work still required
+## Production boundaries
 
-The sandbox deliberately does not claim to be a bank or universal payment rail. A production launch additionally requires a licensed payment/Bharat Connect partner, separate commercial/API access for every supported service, provider-specific OAuth consent, token encryption/KMS, migrations, background retries and notifications, reconciliation, webhook-signature verification, rate limiting, secrets management, monitoring, privacy/retention controls, regulatory and security review, and deployment-specific HTTPS/cookie settings. Providers without a supported API can only use a user-assisted handoff or remain local-only; BillFlow cannot silently edit arbitrary third-party accounts.
+The repository implements migrations, renewal/retry schedules, signed-webhook verification, reconciliation records and a durable notification outbox. Its payment gateway and connected providers remain deterministic sandboxes: no codebase can create the commercial or regulatory authority needed to move real money or edit arbitrary third-party accounts.
+
+A production launch still requires a licensed payment or Bharat Connect partner, commercial/API agreements for supported services, provider OAuth consent, KMS-backed token encryption, organization RBAC and approval controls, notification delivery vendors, rate limiting, secrets management, observability, backups/disaster recovery, privacy and retention controls, regulatory review, and deployment-specific TLS/cookie hardening. Providers without a supported API require a user-assisted handoff or must remain local-only.
 
 ## License
 

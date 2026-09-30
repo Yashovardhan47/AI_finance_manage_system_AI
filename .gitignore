@@ -10,4 +10,7 @@ dist/
 .DS_Store
 coverage.xml
 htmlcov/
-
+playwright-report/
+test-results/
+blob-report/
+*.log
