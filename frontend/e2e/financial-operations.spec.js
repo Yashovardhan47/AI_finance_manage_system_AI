@@ -38,7 +38,7 @@ test('user completes the financial decision-to-outcome workflow', async ({ page 
   await page.getByPlaceholder('Amount').fill('499')
   await page.getByRole('button', { name: 'Add and analyze' }).click()
   await expect(page.getByText('Obligation added and included in the 90-day forecast.')).toBeVisible()
-  await expect(page.getByText('E2E membership')).toBeVisible()
+  await expect(page.getByText('E2E membership', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Flag mismatch' }).first().click()
   await expect(page.getByText('Mismatch recorded. An exception case was opened without assuming success.')).toBeVisible()
