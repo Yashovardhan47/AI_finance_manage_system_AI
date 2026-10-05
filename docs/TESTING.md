@@ -6,9 +6,9 @@
 |---|---|---|
 | Python compile | `python -m compileall -q app` | Import and syntax safety. |
 | Database migration | `DATABASE_URL=sqlite:///./migration-smoke.db alembic upgrade head` | Clean-schema reproducibility. |
-| Backend integration | `pytest -q` | Auth, personal finance, connectors, plan/customer/subscription lifecycle, cycles, proration, usage, tax, payment events, HMAC rejection/replay, retry recovery/exhaustion, refunds, PDFs, analytics, audit, and tenant isolation. |
+| Backend integration | `pytest -q` | Auth, personal finance, connectors, billing lifecycle, Financial Operations obligations/policies/scenarios/approvals/outcomes/consents, gateway security, retries, refunds, PDFs, analytics, audit, and tenant isolation. |
 | Frontend production build | `npm run build` | JSX, CSS, Recharts, lazy route, and optimized bundle compilation. |
-| Browser E2E | `npm run test:e2e` | Register → Billing Operations → seed → charts → pause/resume → invoice detail/PDF link → retry queue → create plan → tax/audit. |
+| Browser E2E | `npm run test:e2e` | Two complete journeys: Billing Operations lifecycle and Financial Autopilot decision-to-outcome workflow. |
 | Load test | Locust command below | Concurrent authenticated operational reads and tenant setup. |
 
 ## Backend
@@ -58,6 +58,10 @@ Each virtual operator registers an isolated tenant and seeds its own determinist
 
 - Invalid lifecycle transitions return a readable `409` and leave state unchanged.
 - Repeating a cycle, usage key, payment key, or gateway event does not duplicate financial state.
+- Repeating obligation bootstrap or action approval does not duplicate obligations or action requests.
+- Advice mode cannot claim preparation or execution; partner handoffs retain external-authorization requirements.
+- A provider-state mismatch opens an evidence-backed exception instead of assuming success.
+- A second user cannot read obligations, scenarios, decisions, actions, outcomes, exceptions, documents, or consent belonging to another user.
 - An immediate upgrade shows both proration credit and debit.
 - A regional tax override wins over a country default only inside its effective window.
 - A failed payment creates exactly three queued attempts and one customer alert.

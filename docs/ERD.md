@@ -81,4 +81,61 @@ erDiagram
     }
 ```
 
-The Alembic initial migration contains the complete personal-finance and billing schema, indexes, foreign keys, unique constraints, and named enum types. Apply it with `alembic upgrade head`.
+## Financial Operations domain
+
+```mermaid
+erDiagram
+    USERS ||--o{ FINANCIAL_OBLIGATIONS : owns
+    BILLS o|--o| FINANCIAL_OBLIGATIONS : normalizes
+    PROVIDER_CONNECTIONS o|--o{ FINANCIAL_OBLIGATIONS : links
+    FINANCIAL_OBLIGATIONS ||--o{ OBLIGATION_DOCUMENTS : evidences
+    USERS ||--|| FINANCIAL_POLICIES : configures
+    FINANCIAL_OBLIGATIONS ||--o{ FINANCIAL_RECOMMENDATIONS : evaluates
+    FINANCIAL_RECOMMENDATIONS ||--o| FINANCIAL_ACTION_REQUESTS : approves
+    FINANCIAL_OBLIGATIONS ||--o{ FINANCIAL_OUTCOME_EVENTS : verifies
+    FINANCIAL_OUTCOME_EVENTS ||--o{ FINANCIAL_EXCEPTION_CASES : reconciles
+    USERS ||--o{ FINANCIAL_SCENARIOS : simulates
+    USERS ||--o{ CONSENT_RECORDS : controls
+
+    FINANCIAL_OBLIGATIONS {
+        int id PK
+        int user_id FK
+        int bill_id FK
+        decimal amount
+        date due_date
+        string status
+        json contract_terms
+        json evidence
+    }
+    FINANCIAL_RECOMMENDATIONS {
+        int id PK
+        int obligation_id FK
+        string action
+        string risk_level
+        decimal confidence
+        json rationale
+        json forecast_snapshot
+    }
+    FINANCIAL_ACTION_REQUESTS {
+        int id PK
+        string idempotency_key UK
+        string status
+        json policy_evaluation
+    }
+    FINANCIAL_OUTCOME_EVENTS {
+        int id PK
+        string event_type
+        string source
+        string status
+        json evidence
+    }
+    FINANCIAL_EXCEPTION_CASES {
+        int id PK
+        string case_type
+        string severity
+        string status
+        string resolution
+    }
+```
+
+The Alembic migration chain contains the personal-finance, billing, and Financial Operations schemas with indexes, foreign keys, and uniqueness constraints. Apply it with `alembic upgrade head`.

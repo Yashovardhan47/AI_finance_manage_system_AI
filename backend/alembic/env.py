@@ -5,7 +5,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from app import billing_models, models  # noqa: F401 - registers every mapped table
+from app import billing_models, models, operations_models  # noqa: F401 - registers every mapped table
 from app.core.config import get_settings
 from app.database import Base
 

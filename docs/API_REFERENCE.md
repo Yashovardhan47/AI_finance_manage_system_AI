@@ -1,4 +1,29 @@
-# Billing Operations API Reference
+# BillFlow API Reference
+
+## Financial Operations OS
+
+Base path: `/api/v1/operations`. Every endpoint requires an authenticated session and scopes records to the current user.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/command-center` | Return policy, 90-day digital twin, obligations, decision inbox, exceptions, category graph, and action trail. |
+| `POST` | `/bootstrap` | Idempotently synchronize bills into obligations and generate recommendations. |
+| `GET/POST` | `/obligations` | List or create universal financial obligations. |
+| `GET/POST` | `/obligations/{id}/documents` | List or attach reviewable contract-document metadata and extracted fields. |
+| `GET/PUT` | `/policy` | Read or update autonomy mode, reserve, preparation limit, and provider-confirmation rules. |
+| `POST` | `/recommendations/refresh` | Recalculate versioned decisions from current financial state. |
+| `POST` | `/recommendations/{id}/decision` | Explicitly approve or reject; approval creates an idempotent action request. |
+| `GET` | `/actions` | Inspect prepared, blocked, advice-only, or partner-authorization requests. |
+| `GET/POST` | `/scenarios` | List or run 90-day what-if simulations. |
+| `GET/POST` | `/outcomes` | Record independent payment/provider outcome evidence. |
+| `GET` | `/exceptions` | List reconciliation and provider-state mismatch cases. |
+| `POST` | `/exceptions/{id}/resolve` | Resolve a case while retaining evidence and audit history. |
+| `GET/POST` | `/consents` | List or grant purpose-bound data consent. |
+| `POST` | `/consents/{id}/revoke` | Revoke consent without erasing its audit trail. |
+
+No Financial Operations endpoint directly settles money. `execute_authorized` creates an `awaiting_partner_authorization` handoff only when the policy permits it and a provider is connected.
+
+## Billing Operations
 
 Base path: `/api/v1/billing`. Except for the signed gateway webhook, endpoints require an authenticated BillFlow session and automatically scope records to the current tenant.
 
