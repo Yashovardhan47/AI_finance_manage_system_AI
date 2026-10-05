@@ -2,12 +2,13 @@
 
 ## System purpose
 
-BillFlow AI contains two tenant-isolated but complementary product areas:
+BillFlow AI contains three tenant-isolated but complementary product areas:
 
 1. **Personal Finance OS** — user bills, linked-provider obligations, balances, SafePay recommendations, and human-authorized settlement.
-2. **Billing Operations** — a SaaS operator control plane for plans, customers, recurring subscriptions, invoices, mock gateway events, retries, refunds, regional tax, PDFs, notifications, audit, and revenue analytics.
+2. **Financial Operations OS** — a universal obligation graph, 90-day digital twin, user policies, explainable decisions, explicit approvals, outcome evidence, consent, and exception recovery.
+3. **Billing Operations** — a SaaS operator control plane for plans, customers, recurring subscriptions, invoices, mock gateway events, retries, refunds, regional tax, PDFs, notifications, audit, and revenue analytics.
 
-The second area implements the complete recurring-payment specification without pretending the sandbox is a licensed payment rail.
+The third area implements the complete recurring-payment specification without pretending the sandbox is a licensed payment rail. The Financial Operations layer applies the same boundary: it can recommend and prepare a handoff, but only an authorized partner can execute it.
 
 ## Runtime topology
 
@@ -15,6 +16,9 @@ The second area implements the complete recurring-payment specification without 
 flowchart TB
     UI[React + Vite] --> API[FastAPI API]
     API --> DB[(PostgreSQL)]
+    API --> OPS[Financial Operations engine]
+    OPS --> DB
+    OPS --> HANDOFF[Authorized partner handoff]
     API --> OUT[Notification outbox]
     API --> GW[Mock signed gateway]
     BEAT[Celery Beat] --> REDIS[(Redis)]

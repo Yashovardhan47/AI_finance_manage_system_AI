@@ -2,6 +2,7 @@ import Brand from './Brand'
 
 const navItems = [
   ['overview', '⌂', 'Overview'],
+  ['autopilot', '◇', 'Autopilot'],
   ['browse', '◎', 'Browse apps'],
   ['bills', '▣', 'Bills & pay'],
   ['billing', '◫', 'Billing ops'],

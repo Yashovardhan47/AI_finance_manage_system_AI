@@ -21,7 +21,10 @@ async def lifespan(_: FastAPI):
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
-    description="AI-assisted personal finance, bill-payment orchestration, and production-style subscription billing operations.",
+    description=(
+        "AI-assisted personal finance, obligation intelligence, decision-to-outcome orchestration, "
+        "bill-payment coordination, and production-style subscription billing operations."
+    ),
     lifespan=lifespan,
 )
 app.add_middleware(
@@ -41,6 +44,7 @@ def root() -> dict:
         "status": "ok",
         "docs": "/docs",
         "payment_boundary": "Recommendations are advisory; every payment requires provider/user authorization.",
+        "financial_operations": "Forecast, decide, approve, hand off, verify, reconcile, and learn.",
     }
 
 

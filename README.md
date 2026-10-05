@@ -1,6 +1,6 @@
 # BillFlow AI
 
-**An explainable personal-finance operating system and secure, all-in-one bill-payment orchestrator.**
+**An explainable Financial Operations OS and secure, all-in-one bill-payment orchestrator.**
 
 BillFlow AI unifies utilities, subscriptions, EMIs, insurance, rent, education fees and recharges. Its **SafePay Intelligence Engine** forecasts daily liquidity, identifies unusual spending and recommends a payment date and funding source while respecting a user-defined reserve. A recommendation never moves money: every payment must cross a separate provider authorization boundary.
 
@@ -16,6 +16,7 @@ Most finance dashboards describe past transactions. BillFlow AI turns future obl
 4. **Robust anomaly detection** uses category-level median absolute deviation instead of treating every large purchase as fraud.
 5. **Explainability** reports the selected date, account, policy, confidence and reason for each recommendation.
 6. **Human authorization** separates AI advice from payment execution and records every state change in an audit trail.
+7. **Closed-loop outcomes** independently verify whether a provider actually cleared, activated, renewed, or refunded the service.
 
 The research direction is an **Explainable Multi-Objective Payment Orchestration System Under Cash-Flow Uncertainty**. A publishable evaluation would compare SafePay against due-date-only, earliest-payment and reward-only baselines using late-payment rate, reserve violations, failed payments, saved fees/rewards and explanation usefulness.
 
@@ -40,6 +41,12 @@ The research direction is an **Explainable Multi-Objective Payment Orchestration
 - 7–90 day cash-flow forecast
 - Financial-health score with visible component breakdown
 - Explainable SafePay plan and robust anomaly flags
+- **Financial Autopilot** command center with a universal obligation graph and 90-day financial digital twin
+- User-controlled advise, prepare, and authorized-partner-handoff policies with explicit approval on every action
+- Evidence-backed pay, schedule, hold, and split/negotiate recommendations
+- Saved what-if simulations for one-time and recurring commitments
+- Contract-document metadata, purpose-bound consent records, provider outcome evidence, and exception recovery
+- Idempotent action requests and tenant-isolated Financial Operations APIs
 - A separate **Billing Operations** control plane for plans, customers, subscriptions, invoices, collections and compliance
 - Trial, active, paused, past-due and cancelled lifecycle rules with immediate or period-end plan changes and cancellation
 - Idempotent renewal cycles, metered usage, proration credits/debits and unique itemized invoices
@@ -57,6 +64,9 @@ flowchart TB
     UI[React + Vite + Recharts] --> API[FastAPI + OpenAPI + JWT]
     API --> DB[(PostgreSQL / SQLite)]
     API --> AI[SafePay intelligence]
+    API --> OPS[Financial Operations OS]
+    OPS --> AI
+    OPS --> CON
     API --> BILL[Billing engine]
     BILL --> GATE[Signed gateway events]
     BILL --> PDF[Invoice PDF engine]
@@ -151,6 +161,7 @@ The measured local Locust profile and its limits are recorded in [`docs/PERFORMA
 ## Project evidence
 
 - [`docs/REQUIREMENTS_TRACEABILITY.md`](docs/REQUIREMENTS_TRACEABILITY.md) — every weekly requirement mapped to code, UI and tests
+- [`docs/FINANCIAL_OPERATIONS_OS.md`](docs/FINANCIAL_OPERATIONS_OS.md) — obligation, policy, approval, outcome, exception, and consent design
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ERD.md`](docs/ERD.md) — runtime design and billing data model
 - [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) — billing endpoint guide; interactive OpenAPI remains at `/docs`
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and [`docs/TESTING.md`](docs/TESTING.md) — operating and verification procedures
