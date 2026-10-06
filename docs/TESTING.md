@@ -6,7 +6,7 @@
 |---|---|---|
 | Python compile | `python -m compileall -q app` | Import and syntax safety. |
 | Database migration | `DATABASE_URL=sqlite:///./migration-smoke.db alembic upgrade head` | Clean-schema reproducibility. |
-| Backend integration | `pytest -q` | Auth, personal finance, connectors, billing lifecycle, Financial Operations obligations/policies/scenarios/approvals/outcomes/consents, gateway security, retries, refunds, PDFs, analytics, audit, and tenant isolation. |
+| Backend integration | `pytest -q` | Auth, personal finance, billing/Financial Operations, gateway security, retries, outbox claiming/backoff, delivery receipts, payment timeout/polling/reconciliation, incident escalation, metrics and tenancy. |
 | Frontend production build | `npm run build` | JSX, CSS, Recharts, lazy route, and optimized bundle compilation. |
 | Browser E2E | `npm run test:e2e` | Two complete journeys: Billing Operations lifecycle and Financial Autopilot decision-to-outcome workflow. |
 | Load test | Locust command below | Concurrent authenticated operational reads and tenant setup. |
@@ -69,4 +69,10 @@ Each virtual operator registers an isolated tenant and seeds its own determinist
 - Refund amount cannot exceed paid minus already refunded.
 - Regenerated invoice PDF includes the refund line and a new hash.
 - A second authenticated tenant cannot list or fetch the first tenant's resources.
+- PostgreSQL claim SQL contains `FOR UPDATE SKIP LOCKED`, and an expired lease can be reclaimed without double-sending an active lease.
+- Provider delivery failure increments attempts, applies exponential backoff, and opens an incident after the configured maximum.
+- Replayed receipt IDs are idempotent; delivered/opened state does not regress on a late failure.
+- A stale pending payment opens a timeout incident; a terminal poll result writes reconciliation evidence and resolves it.
+- Incident acknowledgement stops escalation, while resolution preserves the record and realtime event history.
+- `/metrics` exports queue/payment/incident gauges and the SSE dashboard reconnects without a full page reload.
 - Desktop, tablet, and mobile layouts expose all operator actions without horizontal page overflow.

@@ -1,6 +1,6 @@
 # End-to-End Demo Script
 
-Target length: 6–8 minutes.
+Target length: 8–10 minutes.
 
 ## 1. Frame the problem (30 seconds)
 
@@ -32,8 +32,12 @@ Open **Recovery**. Explain the day 1, 3, and 7 schedule. Click **Recover** to sh
 
 Refund a paid invoice, then reopen its PDF to show the refund line. In **Tax & audit**, show the country/region rule, tax summary, and customer filter. Highlight plan-created, subscription-created, payment-received, payment-failed, plan-changed, and refund-issued events.
 
-## 8. Close with architecture and trust (45 seconds)
+## 8. Demonstrate incidents and realtime delivery (90 seconds)
 
-“FastAPI and PostgreSQL are the system of record, Celery Beat schedules renewals, Redis transports background work, ReportLab generates immutable invoices, and React/Recharts gives operators visibility. The gateway and provider adapters are explicit sandboxes: no PIN, OTP, card, or real money is handled here. Production integration happens only through licensed and official provider APIs.”
+Open **Incidents & alerts**. Show the failed-payment incident, queue depth/age, pending-payment and dead-letter health, and the live SSE badge. Acknowledge the incident, then edit Orbit Learning's email/SMS/push, quiet-hours and escalation policy. Explain that workers claim outbox rows with PostgreSQL `SKIP LOCKED`, retry provider failures with backoff, persist terminal dead letters, and accept signed sent/delivered/opened/failed receipts. Show the reconciliation and receipt panels; these populate from workers and provider callbacks.
+
+## 9. Close with architecture and trust (45 seconds)
+
+“FastAPI and PostgreSQL are the system of record, Celery Beat schedules renewals and watchdogs, Redis transports background work, SMTP/Twilio/FCM adapters deliver configured channels, and durable SSE keeps React current. Prometheus and Sentry expose operational health. The payment gateway remains an explicit sandbox: no PIN, OTP, card, or real money is handled here. Production settlement still happens only through licensed and official provider APIs.”
 
 Before presenting, run the acceptance commands in `docs/TESTING.md` and keep `/docs` open as a fallback technical view.

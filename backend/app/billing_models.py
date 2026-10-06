@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     JSON,
     LargeBinary,
     Numeric,
@@ -318,6 +319,7 @@ class BillingPayment(Base):
     __table_args__ = (
         UniqueConstraint("owner_user_id", "idempotency_key", name="uq_billing_payment_owner_idempotency"),
         UniqueConstraint("gateway_event_id", name="uq_billing_payment_gateway_event"),
+        Index("ix_billing_payment_poll_claim", "status", "next_status_check_at", "processing_state"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -337,6 +339,12 @@ class BillingPayment(Base):
     attempt_number: Mapped[int] = mapped_column(default=0)
     failure_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processing_state: Mapped[str] = mapped_column(String(40), default="pending", index=True)
+    provider_status: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    last_status_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_status_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    timed_out_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reconciled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
@@ -414,6 +422,15 @@ class TaxRate(Base):
 
 class BillingNotification(Base):
     __tablename__ = "billing_notifications"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "dedupe_key", name="uq_billing_notification_owner_dedupe"),
+        Index(
+            "ix_billing_notification_claim",
+            "delivery_status",
+            "next_attempt_at",
+            "lease_expires_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -430,9 +447,159 @@ class BillingNotification(Base):
         index=True,
     )
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    delivery_status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
+    attempt_count: Mapped[int] = mapped_column(default=0)
+    max_attempts: Mapped[int] = mapped_column(default=5)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(40), default="sandbox")
+    provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True, index=True)
+    provider_response: Mapped[dict] = mapped_column(JSON, default=dict)
+    dedupe_key: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    escalation_level: Mapped[int] = mapped_column(default=0)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    dead_lettered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class NotificationPreference(Base):
+    __tablename__ = "notification_preferences"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "customer_id", name="uq_notification_preference_owner_customer"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("billing_customers.id", ondelete="CASCADE"), index=True)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    sms_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    email_address: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    phone_number: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    push_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    event_types: Mapped[list] = mapped_column(JSON, default=lambda: ["*"])
+    quiet_hours_start: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    quiet_hours_end: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    timezone_name: Mapped[str] = mapped_column(String(80), default="UTC")
+    escalation_rules: Mapped[list] = mapped_column(
+        JSON,
+        default=lambda: [
+            {"after_minutes": 5, "channels": ["email"]},
+            {"after_minutes": 15, "channels": ["sms", "push"]},
+        ],
+    )
+    max_delivery_attempts: Mapped[int] = mapped_column(default=5)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PaymentIncident(Base):
+    __tablename__ = "payment_incidents"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "dedupe_key", name="uq_payment_incident_owner_dedupe"),
+        Index("ix_payment_incident_escalation_claim", "status", "next_escalation_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("billing_customers.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    subscription_id: Mapped[int | None] = mapped_column(
+        ForeignKey("billing_subscriptions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    invoice_id: Mapped[int | None] = mapped_column(
+        ForeignKey("billing_invoices.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    payment_id: Mapped[int | None] = mapped_column(
+        ForeignKey("billing_payments.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    incident_type: Mapped[str] = mapped_column(String(80), index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="warning", index=True)
+    status: Mapped[str] = mapped_column(String(25), default="open", index=True)
+    summary: Mapped[str] = mapped_column(String(300))
+    details: Mapped[dict] = mapped_column(JSON, default=dict)
+    dedupe_key: Mapped[str] = mapped_column(String(180))
+    escalation_level: Mapped[int] = mapped_column(default=0)
+    next_escalation_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    first_detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class NotificationReceipt(Base):
+    __tablename__ = "notification_receipts"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_id", name="uq_notification_receipt_provider_event"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    notification_id: Mapped[int] = mapped_column(
+        ForeignKey("billing_notifications.id", ondelete="CASCADE"), index=True
+    )
+    provider: Mapped[str] = mapped_column(String(40), index=True)
+    event_id: Mapped[str] = mapped_column(String(180))
+    provider_message_id: Mapped[str] = mapped_column(String(180), index=True)
+    delivery_status: Mapped[str] = mapped_column(String(30), index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaymentReconciliation(Base):
+    __tablename__ = "payment_reconciliations"
+    __table_args__ = (
+        UniqueConstraint("payment_id", "provider_check_id", name="uq_payment_reconciliation_check"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    payment_id: Mapped[int] = mapped_column(ForeignKey("billing_payments.id", ondelete="CASCADE"), index=True)
+    provider_check_id: Mapped[str] = mapped_column(String(180))
+    previous_status: Mapped[str] = mapped_column(String(40))
+    provider_status: Mapped[str] = mapped_column(String(80), index=True)
+    resolved_status: Mapped[str] = mapped_column(String(40), index=True)
+    provider_payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class RealtimeBillingEvent(Base):
+    __tablename__ = "realtime_billing_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    entity_type: Mapped[str] = mapped_column(String(80))
+    entity_id: Mapped[int | None] = mapped_column(nullable=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class TaskDeadLetter(Base):
+    __tablename__ = "task_dead_letters"
+    __table_args__ = (UniqueConstraint("task_id", name="uq_task_dead_letter_task_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    task_id: Mapped[str] = mapped_column(String(180))
+    task_name: Mapped[str] = mapped_column(String(180), index=True)
+    queue_name: Mapped[str] = mapped_column(String(80), default="billing.dead_letter")
+    args: Mapped[list] = mapped_column(JSON, default=list)
+    kwargs: Mapped[dict] = mapped_column(JSON, default=dict)
+    exception_type: Mapped[str] = mapped_column(String(160))
+    exception_message: Mapped[str] = mapped_column(Text)
+    traceback_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attempts: Mapped[int] = mapped_column(default=1)
+    status: Mapped[str] = mapped_column(String(25), default="unresolved", index=True)
+    failed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class BillingWebhookEvent(Base):

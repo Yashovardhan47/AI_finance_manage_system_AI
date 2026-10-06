@@ -21,13 +21,16 @@ const tabs = [
   ['subscriptions', 'Subscriptions'],
   ['invoices', 'Invoices'],
   ['recovery', 'Recovery'],
+  ['incidents', 'Incidents & alerts'],
   ['catalog', 'Catalog & customers'],
   ['compliance', 'Tax & audit'],
 ]
 const chartColors = ['#1a6c52', '#77e6bb', '#d6f579', '#e3a13b', '#c65f4b', '#6b78c8', '#87938e']
 const blankData = {
   dashboard: null, plans: [], customers: [], subscriptions: [], invoices: [], retries: [],
-  taxes: [], taxSummary: { total_tax: 0, items: [] }, notifications: [], audit: [],
+  taxes: [], taxSummary: { total_tax: 0, items: [] }, notifications: [], audit: [], incidents: [],
+  preferences: [], receipts: [], reconciliations: [],
+  queueHealth: { status: 'healthy', queued_notifications: 0, oldest_notification_seconds: 0, pending_payments: 0, open_incidents: 0, unresolved_dead_letters: 0 },
 }
 
 export default function BillingOperations() {
@@ -38,9 +41,11 @@ export default function BillingOperations() {
   const [notice, setNotice] = useState(null)
   const [modal, setModal] = useState(null)
   const [expandedInvoice, setExpandedInvoice] = useState(null)
+  const [liveStatus, setLiveStatus] = useState('connecting')
+  const [lastEvent, setLastEvent] = useState(null)
 
   const load = async () => {
-    const [dashboard, plans, customers, subscriptions, invoices, retries, taxes, taxSummary, notifications, audit] = await Promise.all([
+    const [dashboard, plans, customers, subscriptions, invoices, retries, taxes, taxSummary, notifications, audit, incidents, preferences, receipts, reconciliations, queueHealth] = await Promise.all([
       api('/billing/dashboard'),
       api('/billing/plans?include_archived=true'),
       api('/billing/customers'),
@@ -51,12 +56,31 @@ export default function BillingOperations() {
       api('/billing/tax-summary'),
       api('/billing/notifications'),
       api('/billing/audit'),
+      api('/billing/incidents'),
+      api('/billing/notification-preferences'),
+      api('/billing/notification-receipts'),
+      api('/billing/reconciliations'),
+      api('/billing/queue-health'),
     ])
-    setData({ dashboard, plans, customers, subscriptions, invoices, retries, taxes, taxSummary, notifications, audit })
+    setData({ dashboard, plans, customers, subscriptions, invoices, retries, taxes, taxSummary, notifications, audit, incidents, preferences, receipts, reconciliations, queueHealth })
   }
 
   useEffect(() => {
     load().catch((error) => setNotice({ kind: 'error', text: error.message })).finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    let refreshTimer
+    const stream = new EventSource(`${API_URL}/billing/events/stream`, { withCredentials: true })
+    stream.onopen = () => setLiveStatus('live')
+    stream.onerror = () => setLiveStatus('reconnecting')
+    stream.addEventListener('billing', (event) => {
+      const message = JSON.parse(event.data)
+      setLastEvent(message)
+      clearTimeout(refreshTimer)
+      refreshTimer = setTimeout(() => load().catch(() => setLiveStatus('reconnecting')), 250)
+    })
+    return () => { clearTimeout(refreshTimer); stream.close() }
   }, [])
 
   const act = async (key, success, task) => {
@@ -105,7 +129,7 @@ export default function BillingOperations() {
         <div className="billing-title-actions"><button className="button" disabled={busy === 'cycles' || empty} onClick={runCycles}>{busy === 'cycles' ? 'Running…' : 'Run billing cycle'}</button><button className="button primary" disabled={busy === 'seed' || !empty} onClick={seed}>{empty ? (busy === 'seed' ? 'Preparing…' : 'Load live demo') : 'Workspace ready'}</button></div>
       </div>
       {notice && <div className={`notice ${notice.kind === 'error' ? 'error' : ''}`} role="status"><span>{notice.text}</span><button aria-label="Dismiss" onClick={() => setNotice(null)}>×</button></div>}
-      <div className="billing-assurance"><span>✓</span><div><b>Production-shaped, sandbox-safe</b><small>Every operation is tenant-scoped, idempotent and audited. Gateway actions simulate signed provider events; no real money moves.</small></div><code>Celery · PostgreSQL · HMAC · PDF</code></div>
+      <div className="billing-assurance"><span className={`live-dot ${liveStatus}`}>●</span><div><b>Real-time incident engine · {human(liveStatus)}</b><small>PostgreSQL job leases, Celery recovery, signed receipts and a durable SSE feed keep every operator view current.</small></div><code>{lastEvent ? human(lastEvent.event_type) : 'Celery · SSE · Prometheus'}</code></div>
       <nav className="billing-tabs" aria-label="Billing operations sections">
         {tabs.map(([id, label]) => <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}</button>)}
       </nav>
@@ -114,7 +138,8 @@ export default function BillingOperations() {
         {tab === 'overview' && <OverviewTab data={data} onInvoice={(invoice) => { setExpandedInvoice(invoice); setTab('invoices') }} />}
         {tab === 'subscriptions' && <SubscriptionsTab data={data} busy={busy} onOpen={setModal} onPause={pause} onResume={resume} />}
         {tab === 'invoices' && <InvoicesTab invoices={data.invoices} busy={busy} expanded={expandedInvoice} onExpand={setExpandedInvoice} onCharge={charge} onOpen={setModal} />}
-        {tab === 'recovery' && <RecoveryTab retries={data.retries} notifications={data.notifications} busy={busy} onRun={runRetry} />}
+        {tab === 'recovery' && <RecoveryTab retries={data.retries} notifications={data.notifications} receipts={data.receipts} busy={busy} onRun={runRetry} />}
+        {tab === 'incidents' && <IncidentTab data={data} busy={busy} act={act} liveStatus={liveStatus} lastEvent={lastEvent} />}
         {tab === 'catalog' && <CatalogTab data={data} busy={busy} onOpen={setModal} onArchive={archivePlan} />}
         {tab === 'compliance' && <ComplianceTab data={data} onOpen={setModal} />}
       </>}
@@ -178,9 +203,76 @@ function InvoiceLines({ invoice }) {
   return <div className="invoice-lines"><div className="invoice-line heading"><span>Type</span><span>Description</span><span>Quantity × rate</span><strong>Amount</strong></div>{invoice.line_items.map((line) => <div className="invoice-line" key={line.id}><span className="line-type">{human(line.line_type)}</span><span>{line.description}</span><span>{line.quantity} × {formatMoney(line.unit_amount, invoice.currency)}</span><strong>{formatMoney(line.amount, invoice.currency)}</strong></div>)}<div className="invoice-total"><span>Subtotal {formatMoney(invoice.subtotal, invoice.currency)} · Usage {formatMoney(invoice.usage_total, invoice.currency)} · Proration {formatMoney(invoice.proration_total, invoice.currency)} · Tax {formatMoney(invoice.tax_total, invoice.currency)}</span><b>Total {formatMoney(invoice.total, invoice.currency)}</b></div></div>
 }
 
-function RecoveryTab({ retries, notifications, busy, onRun }) {
+function RecoveryTab({ retries, notifications, receipts, busy, onRun }) {
   const queued = retries.filter((retry) => retry.status === 'queued')
-  return <section className="recovery-grid"><article className="panel retry-panel"><div className="panel-heading"><div><span className="eyebrow">Automated dunning</span><h2>Day 1 · 3 · 7 retry queue</h2></div><span className="count-badge">{queued.length} queued</span></div><div className="retry-list">{retries.map((retry) => <div className="retry-row" key={retry.id}><span className={`retry-step ${retry.status}`}>{retry.attempt_number}</span><div><b>{retry.invoice_number}</b><small>Attempt {retry.attempt_number} · {shortDateTime(retry.scheduled_for)}</small>{retry.last_error && <em>{retry.last_error}</em>}</div><span className={`status ${retry.status}`}>{human(retry.status)}</span>{retry.status === 'queued' ? <div className="row-actions"><button className="icon-button success" disabled={busy.startsWith(`retry-${retry.id}`)} onClick={() => onRun(retry, 'success')}>Recover</button><button className="icon-button danger" disabled={busy.startsWith(`retry-${retry.id}`)} onClick={() => onRun(retry, 'failure')}>Decline</button></div> : <span />}</div>)}{!retries.length && <div className="mini-empty">No payment recovery attempts yet.</div>}</div></article><article className="panel notification-panel"><div className="panel-heading"><div><span className="eyebrow">Durable outbox</span><h2>Customer notifications</h2></div></div>{notifications.slice(0, 12).map((item) => <div className="notification-row" key={item.id}><span>{notificationIcon(item.event_type)}</span><div><b>{human(item.event_type)}</b><small>{item.recipient} · {item.channel}</small></div><span className={`status ${item.status}`}>{item.status}</span></div>)}{!notifications.length && <div className="mini-empty">Events will appear after payment activity.</div>}</article></section>
+  return <section className="recovery-grid"><article className="panel retry-panel"><div className="panel-heading"><div><span className="eyebrow">Automated dunning</span><h2>Day 1 · 3 · 7 retry queue</h2></div><span className="count-badge">{queued.length} queued</span></div><div className="retry-list">{retries.map((retry) => <div className="retry-row" key={retry.id}><span className={`retry-step ${retry.status}`}>{retry.attempt_number}</span><div><b>{retry.invoice_number}</b><small>Attempt {retry.attempt_number} · {shortDateTime(retry.scheduled_for)}</small>{retry.last_error && <em>{retry.last_error}</em>}</div><span className={`status ${retry.status}`}>{human(retry.status)}</span>{retry.status === 'queued' ? <div className="row-actions"><button className="icon-button success" disabled={busy.startsWith(`retry-${retry.id}`)} onClick={() => onRun(retry, 'success')}>Recover</button><button className="icon-button danger" disabled={busy.startsWith(`retry-${retry.id}`)} onClick={() => onRun(retry, 'failure')}>Decline</button></div> : <span />}</div>)}{!retries.length && <div className="mini-empty">No payment recovery attempts yet.</div>}</div></article><article className="panel notification-panel"><div className="panel-heading"><div><span className="eyebrow">Transactional outbox</span><h2>Delivery lifecycle</h2></div><span className="count-badge">{receipts.length} receipts</span></div>{notifications.slice(0, 12).map((item) => <div className="notification-row" key={item.id}><span>{notificationIcon(item.event_type)}</span><div><b>{human(item.event_type)}</b><small>{item.channel} · {item.provider} · attempt {item.attempt_count}/{item.max_attempts}</small></div><span className={`status ${item.delivery_status}`}>{human(item.delivery_status)}</span></div>)}{!notifications.length && <div className="mini-empty">Events will appear after payment activity.</div>}</article></section>
+}
+
+function IncidentTab({ data, busy, act, liveStatus, lastEvent }) {
+  const health = data.queueHealth
+  const open = data.incidents.filter((item) => item.status !== 'resolved')
+  const incidentAction = (incident, action) => act(
+    `incident-${incident.id}-${action}`,
+    `Incident ${action === 'acknowledge' ? 'acknowledged' : 'resolved'}.`,
+    () => api(`/billing/incidents/${incident.id}/${action}`, { method: 'POST' }),
+  )
+  return <>
+    <section className="incident-health-grid">
+      <Metric label="Incident center" value={open.length} note={`${data.incidents.filter((item) => item.severity === 'critical' && item.status !== 'resolved').length} critical`} tone={open.length ? 'rose' : 'mint'} />
+      <Metric label="Outbox queued" value={health.queued_notifications} note={`Oldest ${formatDuration(health.oldest_notification_seconds)}`} tone={health.queued_notifications ? 'amber' : 'mint'} />
+      <Metric label="Pending payments" value={health.pending_payments} note="Timeout watchdog active" tone={health.pending_payments ? 'amber' : ''} />
+      <Metric label="Task dead letters" value={health.unresolved_dead_letters} note="Celery terminal failures" tone={health.unresolved_dead_letters ? 'rose' : 'mint'} />
+      <Metric label="Live stream" value={human(liveStatus)} note={lastEvent ? human(lastEvent.event_type) : 'Waiting for domain event'} tone={liveStatus === 'live' ? 'mint' : 'amber'} />
+    </section>
+    <section className="incident-layout">
+      <article className="panel incident-center"><div className="panel-heading"><div><span className="eyebrow">Payment incident command</span><h2>Exceptions requiring attention</h2></div><span className={`health-pill ${health.status}`}>{human(health.status)}</span></div>{data.incidents.map((incident) => <div className={`incident-row ${incident.severity}`} key={incident.id}><span className="incident-symbol">{incident.severity === 'critical' ? '!' : 'i'}</span><div><div className="incident-name"><b>{incident.summary}</b><span className={`status ${incident.status}`}>{human(incident.status)}</span></div><small>{human(incident.incident_type)} · detected {shortDateTime(incident.first_detected_at)} · escalation L{incident.escalation_level}</small><p>{incident.details?.failure_reason || incident.details?.error || `Payment ${incident.payment_id || 'queue'} is under automated observation.`}</p></div><div className="incident-actions">{incident.status === 'open' && <button className="icon-button" disabled={busy.startsWith(`incident-${incident.id}`)} onClick={() => incidentAction(incident, 'acknowledge')}>Acknowledge</button>}{incident.status !== 'resolved' && <button className="icon-button success" disabled={busy.startsWith(`incident-${incident.id}`)} onClick={() => incidentAction(incident, 'resolve')}>Resolve</button>}</div></div>)}{!data.incidents.length && <div className="mini-empty">No payment incidents. The watchdog is monitoring pending transactions.</div>}</article>
+      <PreferenceEditor data={data} busy={busy} act={act} />
+    </section>
+    <section className="panel delivery-observability"><div className="panel-heading"><div><span className="eyebrow">Provider evidence</span><h2>Reconciliation & delivery receipts</h2></div><small>Queued → sent → delivered → opened / failed</small></div><div className="receipt-columns"><div><h3>Latest delivery receipts</h3>{data.receipts.slice(0, 8).map((receipt) => <div className="receipt-row" key={receipt.id}><span className={`status ${receipt.status}`}>{human(receipt.status)}</span><div><b>{human(receipt.event_type)}</b><small>{receipt.provider} · {shortDateTime(receipt.occurred_at)}</small></div></div>)}{!data.receipts.length && <div className="mini-empty compact">Receipts arrive through signed provider webhooks.</div>}</div><div><h3>Gateway reconciliation</h3>{data.reconciliations.slice(0, 8).map((item) => <div className="receipt-row" key={item.id}><span className={`status ${item.resolved_status}`}>{human(item.resolved_status)}</span><div><b>Payment #{item.payment_id}</b><small>{human(item.provider_status)} · {shortDateTime(item.checked_at)}</small></div></div>)}{!data.reconciliations.length && <div className="mini-empty compact">Pending provider states are polled and recorded here.</div>}</div></div></section>
+  </>
+}
+
+function PreferenceEditor({ data, busy, act }) {
+  const [customerId, setCustomerId] = useState(data.customers[0]?.id || '')
+  const customer = data.customers.find((item) => item.id === Number(customerId)) || data.customers[0]
+  const preference = data.preferences.find((item) => item.customer_id === customer?.id)
+  const [form, setForm] = useState(() => preferenceForm(preference, customer))
+  useEffect(() => setForm(preferenceForm(preference, customer)), [preference?.id, customer?.id, preference?.updated_at])
+  const update = (key, value) => setForm((current) => ({ ...current, [key]: value }))
+  const submit = (event) => {
+    event.preventDefault()
+    const firstEscalation = Math.max(1, Number(form.first_escalation) || 5)
+    const urgentEscalation = Math.max(firstEscalation + 1, Number(form.urgent_escalation) || 15)
+    return act('preference', 'Notification channels and escalation rules updated.', () => api(`/billing/notification-preferences/${customer.id}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        email_enabled: form.email_enabled, sms_enabled: form.sms_enabled, push_enabled: form.push_enabled,
+        email_address: form.email_address || customer.email, phone_number: form.phone_number || null,
+        push_token: form.push_token || null, event_types: ['*'], quiet_hours_start: form.quiet_hours ? form.quiet_hours_start : null,
+        quiet_hours_end: form.quiet_hours ? form.quiet_hours_end : null, timezone_name: form.timezone_name,
+        escalation_rules: [{ after_minutes: firstEscalation, channels: ['email'] }, { after_minutes: urgentEscalation, channels: ['sms', 'push'] }],
+        max_delivery_attempts: Number(form.max_delivery_attempts),
+      }),
+    }))
+  }
+  if (!customer) return <article className="panel"><div className="mini-empty">Add a customer to configure notification delivery.</div></article>
+  return <article className="panel preference-panel"><div className="panel-heading"><div><span className="eyebrow">User notification policy</span><h2>Channels & escalation</h2></div></div><form onSubmit={submit}><Field label="Customer"><select value={customer.id} onChange={(event) => setCustomerId(event.target.value)}>{data.customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Field><div className="channel-toggles">{['email','sms','push'].map((channel) => <label key={channel}><input type="checkbox" checked={form[`${channel}_enabled`]} onChange={(event) => update(`${channel}_enabled`, event.target.checked)} /><span>{human(channel)}</span></label>)}</div><Field label="Email"><input type="email" value={form.email_address} onChange={(event) => update('email_address', event.target.value)} /></Field><div className="field-grid"><Field label="SMS number"><input value={form.phone_number} placeholder="+15550001003" onChange={(event) => update('phone_number', event.target.value)} /></Field><Field label={preference?.push_token_configured ? 'Push token (configured)' : 'Push token'}><input value={form.push_token} placeholder={preference?.push_token_configured ? 'Leave blank to keep token' : 'FCM device token'} onChange={(event) => update('push_token', event.target.value)} /></Field></div><label className="check-field"><input type="checkbox" checked={form.quiet_hours} onChange={(event) => update('quiet_hours', event.target.checked)} /><span>Respect customer quiet hours</span></label>{form.quiet_hours && <div className="field-grid"><Field label="Quiet from"><input type="time" value={form.quiet_hours_start} onChange={(event) => update('quiet_hours_start', event.target.value)} /></Field><Field label="Quiet until"><input type="time" value={form.quiet_hours_end} onChange={(event) => update('quiet_hours_end', event.target.value)} /></Field></div>}<Field label="IANA timezone"><input value={form.timezone_name} onChange={(event) => update('timezone_name', event.target.value)} /></Field><div className="field-grid"><Field label="Escalate after (minutes)"><input type="number" min="1" value={form.first_escalation} onChange={(event) => update('first_escalation', event.target.value)} /></Field><Field label="Urgent after (minutes)"><input type="number" min="2" value={form.urgent_escalation} onChange={(event) => update('urgent_escalation', event.target.value)} /></Field></div><Field label="Maximum delivery attempts"><input type="number" min="1" max="20" value={form.max_delivery_attempts} onChange={(event) => update('max_delivery_attempts', event.target.value)} /></Field><button className="button primary full-button" disabled={busy === 'preference'}>{busy === 'preference' ? 'Saving…' : 'Save notification policy'}</button></form></article>
+}
+
+function preferenceForm(preference, customer) {
+  return {
+    email_enabled: preference?.email_enabled ?? true,
+    sms_enabled: preference?.sms_enabled ?? false,
+    push_enabled: preference?.push_enabled ?? false,
+    email_address: preference?.email_address || customer?.email || '',
+    phone_number: preference?.phone_number || '', push_token: '',
+    quiet_hours: Boolean(preference?.quiet_hours_start && preference?.quiet_hours_end),
+    quiet_hours_start: preference?.quiet_hours_start || '22:00', quiet_hours_end: preference?.quiet_hours_end || '07:00',
+    timezone_name: preference?.timezone_name || 'UTC',
+    first_escalation: preference?.escalation_rules?.[0]?.after_minutes || 5,
+    urgent_escalation: preference?.escalation_rules?.[1]?.after_minutes || 15,
+    max_delivery_attempts: preference?.max_delivery_attempts || 5,
+  }
 }
 
 function CatalogTab({ data, busy, onOpen, onArchive }) {
@@ -248,6 +340,7 @@ function human(value = '') { return String(value).replaceAll('_', ' ').replaceAl
 function shortDate(value) { if (!value) return '—'; return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(value.length === 10 ? `${value}T00:00:00` : value)) }
 function shortDateTime(value) { if (!value) return '—'; return new Intl.DateTimeFormat('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value)) }
 function compactNumber(value) { return new Intl.NumberFormat('en-IN', { notation: 'compact', maximumFractionDigits: 1 }).format(value) }
+function formatDuration(seconds) { const value = Number(seconds || 0); if (value < 60) return `${Math.round(value)}s`; if (value < 3600) return `${Math.round(value / 60)}m`; return `${(value / 3600).toFixed(1)}h` }
 function uid(prefix) { return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`}` }
 function periodProgress(subscription) { const start = new Date(subscription.current_period_start).getTime(); const end = new Date(subscription.current_period_end).getTime(); return Math.min(100, Math.max(0, ((Date.now() - start) / Math.max(1, end - start)) * 100)) }
 function notificationIcon(type) { return type.includes('failed') ? '!' : type.includes('refund') ? '↩' : type.includes('cancel') ? '×' : '✓' }

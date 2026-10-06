@@ -405,6 +405,8 @@ def process_due_billing_cycles(db: Session, *, as_of: datetime | None = None, ow
             and_(BillingSubscription.next_billing_at.is_not(None), BillingSubscription.next_billing_at <= now),
         )
         .order_by(BillingSubscription.next_billing_at, BillingSubscription.id)
+        .with_for_update(skip_locked=True)
+        .limit(100)
     )
     if owner_user_id is not None:
         query = query.where(BillingSubscription.owner_user_id == owner_user_id)

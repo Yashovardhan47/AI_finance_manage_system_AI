@@ -6,7 +6,7 @@ BillFlow AI contains three tenant-isolated but complementary product areas:
 
 1. **Personal Finance OS** — user bills, linked-provider obligations, balances, SafePay recommendations, and human-authorized settlement.
 2. **Financial Operations OS** — a universal obligation graph, 90-day digital twin, user policies, explainable decisions, explicit approvals, outcome evidence, consent, and exception recovery.
-3. **Billing Operations** — a SaaS operator control plane for plans, customers, recurring subscriptions, invoices, mock gateway events, retries, refunds, regional tax, PDFs, notifications, audit, and revenue analytics.
+3. **Billing Operations** — a SaaS operator control plane for plans, customers, recurring subscriptions, invoices, gateway events, retries, refunds, regional tax, PDFs, real-time payment incidents, multi-channel notifications, audit, and revenue analytics.
 
 The third area implements the complete recurring-payment specification without pretending the sandbox is a licensed payment rail. The Financial Operations layer applies the same boundary: it can recommend and prepare a handoff, but only an authorized partner can execute it.
 
@@ -19,12 +19,13 @@ flowchart TB
     API --> OPS[Financial Operations engine]
     OPS --> DB
     OPS --> HANDOFF[Authorized partner handoff]
-    API --> OUT[Notification outbox]
+    API --> SSE[Durable SSE feed]
     API --> GW[Mock signed gateway]
     BEAT[Celery Beat] --> REDIS[(Redis)]
     REDIS --> WORKER[Celery worker]
     WORKER --> DB
-    WORKER --> OUT
+    WORKER --> OUT[Transactional outbox]
+    OUT --> ADAPTERS[SMTP · Twilio · FCM]
     API --> PDF[ReportLab PDF engine]
     PDF --> DB
 ```
@@ -80,6 +81,32 @@ State changes are validated centrally and timestamped (`trial_started_at`, `acti
 - Exhausting the third retry cancels the subscription and creates a durable notification event.
 - Refunds cannot exceed the paid, unrefunded balance. They add a negative invoice line and invalidate the stored PDF so the next download reflects the refund.
 
+## Real-time incident and notification flow
+
+```mermaid
+flowchart TD
+    A[Domain transaction] --> B[Outbox row + realtime event]
+    C[Celery Beat] --> D[Worker claims with SKIP LOCKED]
+    D --> E{Provider accepted?}
+    E -- Yes --> F[Sent; await signed receipt]
+    E -- No --> G[Exponential backoff]
+    G --> H{Attempts exhausted?}
+    H -- No --> D
+    H -- Yes --> I[Dead-lettered notification + incident]
+    F --> J[Delivered or opened]
+```
+
+- Payment, incident, and notification events are inserted in the same database transaction as the state they describe.
+- Workers claim bounded batches with `FOR UPDATE SKIP LOCKED`, change them to `processing`, commit the lease, and perform provider I/O without holding a row lock.
+- Expired leases are reclaimable after a worker crash. Provider failures use bounded exponential backoff; exhausted messages remain queryable and open an incident.
+- SMTP, Twilio and Firebase Cloud Messaging are production-capable adapters selected by environment variables. `sandbox` remains the default and never makes a network call.
+- Provider callbacks use an independent HMAC secret and append idempotent receipt rows. Delivery state never regresses from `opened` or `delivered` to a late failure.
+- A durable `realtime_billing_events` table backs authenticated SSE. Browser reconnects resume from `Last-Event-ID`, so worker-process events are not lost between API instances.
+
+## Pending-payment and reconciliation loop
+
+Celery Beat runs a timeout watchdog, gateway poller, incident escalator, and queue-health monitor every minute. A payment that remains pending beyond `PENDING_PAYMENT_TIMEOUT_SECONDS` is marked `timed_out`, given an incident, and scheduled for immediate provider inquiry. Poll results are normalized to pending, succeeded, or failed, persisted as `payment_reconciliations`, and applied through the same signed, idempotent gateway-event path. A terminal provider result resolves timeout incidents but retains their full history.
+
 ## Security and tenancy
 
 - JWT sessions are accepted through an HTTP-only cookie or Bearer token.
@@ -95,4 +122,6 @@ PostgreSQL is the deployment database. SQLite remains supported for local develo
 
 ## Observability boundaries
 
-The health endpoint reports process readiness. Audit logs explain business state changes; notification outbox rows expose delivery state; Celery and container logs expose worker failures. Production should additionally add metrics, tracing, alerting, centralized logs, and dead-letter monitoring.
+`/health` reports process readiness and `/metrics` exposes Prometheus HTTP, outbox, payment, incident, delivery and dead-letter metrics. Optional Sentry initialization captures FastAPI and Celery exceptions when `SENTRY_DSN` is configured. Queue-health jobs turn backlog count or oldest-message threshold breaches into durable incidents. Terminal Celery failures are recorded in `task_dead_letters` after five automatic, jittered backoff retries.
+
+Production still needs a metrics scraper, alert routing/SLO ownership, centralized logs, retention controls and infrastructure-level database/Redis monitoring. The application instrumentation does not provision those external systems.

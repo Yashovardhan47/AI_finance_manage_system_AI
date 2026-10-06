@@ -10,7 +10,8 @@ The implemented product is complete for the supplied engineering specification a
 
 ## Notifications
 
-- The durable outbox is implemented, but its default Celery adapter marks sandbox delivery as sent. Integrate an approved email/SMS/push provider, delivery webhooks, suppression handling, templates, and dead-letter alerts.
+- SMTP, Twilio SMS and Firebase Cloud Messaging adapters, signed delivery receipts, bounded retry/dead-letter handling and queue alerts are implemented. They stay in sandbox mode until provisioned credentials are supplied.
+- Production messaging still requires verified senders, commercial vendor accounts, consent/unsubscribe and suppression processing, localized templates, regional messaging compliance, vendor-specific receipt translation and rate-limit tuning.
 
 ## Tax and accounting
 
@@ -27,7 +28,7 @@ The implemented product is complete for the supplied engineering specification a
 
 - SQLite is only for local development/tests. PostgreSQL is the supported multi-process deployment database.
 - PDFs are stored in the database for specification fidelity. High-volume deployments should move immutable files to encrypted object storage.
-- Health checks are process-level. Production needs metrics, traces, centralized logs, queue alerts, SLOs, disaster recovery exercises, and multi-zone design.
+- Application Prometheus metrics, optional Sentry capture and queue-health incidents are implemented. Production still needs an internal metrics scraper, alert routing, centralized logs, SLO ownership, disaster recovery exercises, and multi-zone design.
 - Currency is stored per plan/invoice, but foreign exchange conversion and consolidated multi-currency reporting are not implemented.
 
 These boundaries are also visible in the UI and documentation so a sandbox event is never presented as a real financial settlement.

@@ -36,7 +36,24 @@ The running API publishes authoritative OpenAPI at `/openapi.json`, interactive 
 | `POST` | `/demo/seed` | Idempotently seed realistic plans, customers, lifecycle states, invoices, payments, retries, tax, notifications, and history. |
 | `GET` | `/dashboard?months=12` | MRR, lifecycle, churn, trial conversion, outstanding revenue, retry count, invoice status, revenue trend, and revenue by plan. |
 | `GET` | `/audit?customer_id=&limit=100` | Complete tenant or customer-scoped billing event history. |
-| `GET` | `/notifications` | Durable customer notification outbox. |
+| `GET` | `/notifications` | Transactional outbox with delivery state, attempts, provider IDs and timestamps. |
+
+## Incidents, notification delivery and live operations
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/incidents?status=` | List tenant payment, provider, delivery and queue-health incidents. |
+| `POST` | `/incidents/{id}/acknowledge` | Stop automatic escalation while retaining the incident. |
+| `POST` | `/incidents/{id}/resolve` | Resolve an incident and preserve its timeline. |
+| `GET/PUT` | `/notification-preferences[/{customer_id}]` | Read or replace channel, address, quiet-hours, retry and escalation policy. |
+| `POST` | `/webhooks/notification-receipts/{provider}` | Accept an idempotent HMAC-signed queued/sent/delivered/opened/failed receipt. |
+| `GET` | `/notification-receipts` | Inspect provider delivery evidence. |
+| `GET` | `/reconciliations` | Inspect every gateway status check and its normalized result. |
+| `GET` | `/queue-health` | Return tenant outbox age/depth, pending payment, incident and dead-letter health. |
+| `GET` | `/events?after=` | Read durable domain events by monotonically increasing ID. |
+| `GET` | `/events/stream` | Authenticated SSE feed with `Last-Event-ID` resume and heartbeats. |
+
+Notification receipt callers sign the canonical JSON payload with `NOTIFICATION_RECEIPT_WEBHOOK_SECRET` and send the lowercase SHA-256 HMAC in `X-BillFlow-Signature`. `event_id` is unique per provider, so a replay returns `duplicate: true` without changing state twice.
 
 ## Plans and customers
 
@@ -94,5 +111,7 @@ Webhook callers send the lowercase SHA-256 digest in `X-BillFlow-Signature`. The
 - `404`: missing resource or a resource outside the current tenant.
 - `409`: lifecycle conflict, duplicate commercial key, invalid charge state, or excessive refund.
 - `422`: Pydantic validation error with field-level details.
+
+Prometheus exposition is available at the unauthenticated infrastructure endpoint `/metrics`; keep it private at the ingress or scrape it on an internal network.
 
 Money is transmitted as JSON numbers at the HTTP boundary and calculated with Python `Decimal` internally. Dates use ISO 8601; timestamps are UTC.

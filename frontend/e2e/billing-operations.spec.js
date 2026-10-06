@@ -37,6 +37,16 @@ test('operator completes the billing lifecycle workspace', async ({ page }) => {
   await expect(page.getByText('Day 1 · 3 · 7 retry queue')).toBeVisible()
   await expect(page.locator('.retry-row')).toHaveCount(3)
 
+  await page.getByRole('button', { name: 'Incidents & alerts', exact: true }).click()
+  await expect(page.getByText('Exceptions requiring attention')).toBeVisible()
+  await expect(page.locator('.incident-row')).toHaveCount(1)
+  await expect(page.getByText('Payment failed for')).toBeVisible()
+  await page.locator('.incident-row').first().getByRole('button', { name: 'Acknowledge' }).click()
+  await expect(page.getByText('Incident acknowledged.')).toBeVisible()
+  await expect(page.locator('.incident-row').first().getByText('Acknowledged')).toBeVisible()
+  await page.getByRole('button', { name: 'Save notification policy' }).click()
+  await expect(page.getByText('Notification channels and escalation rules updated.')).toBeVisible()
+
   await page.getByRole('button', { name: 'Catalog & customers' }).click()
   await page.getByRole('button', { name: '+ Billing plan' }).click()
   await page.getByLabel('Plan code').fill(`e2e-${Date.now()}`)

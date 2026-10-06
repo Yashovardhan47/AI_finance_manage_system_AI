@@ -36,7 +36,7 @@ This matrix maps every bullet in the supplied 8-week specification to working co
 
 | Requirement | Implementation | Verification |
 |---|---|---|
-| End-to-end chain from subscription through dashboard, including edge cases | 21 backend integration/regression tests plus browser E2E | `pytest -q`; `npm run test:e2e`; CI jobs |
+| End-to-end chain from subscription through dashboard, including edge cases | 36 backend integration/regression tests plus browser E2E | `pytest -q`; `npm run test:e2e`; CI jobs |
 | Locust load/stress benchmark and performance review | `loadtests/locustfile.py`; `docs/PERFORMANCE.md` | 20-user result: 783 requests, 0 failures, 39.52 req/s, aggregate p95 49 ms in the documented local profile |
 | Clear validated forms, contextual help, responsive mobile/tablet, transitions, and errors | Native constraints + API errors; contextual sandbox/lifecycle copy; four responsive breakpoints | Vite build and Playwright desktop path; manual responsive checklist |
 | Architecture, flows, OpenAPI, ERD, Docker deployment, and known limitations | `docs/ARCHITECTURE.md`, `API_REFERENCE.md`, `ERD.md`, `DEPLOYMENT.md`, `KNOWN_LIMITATIONS.md`; live `/docs` | Documentation review and Docker Compose config validation |
@@ -49,3 +49,17 @@ This matrix maps every bullet in the supplied 8-week specification to working co
 - **Financial precision:** `Decimal` calculations and fixed-scale database numerics.
 - **Auditability:** state-changing business operations record entity, tenant user, customer context, details, and timestamp.
 - **Safety:** mock/provider boundaries are explicit; browser users cannot silently move real money.
+
+## Real-time payment incident and notification enhancement
+
+| Requirement | Implementation | Verification |
+|---|---|---|
+| Real email, SMS and push | SMTP, Twilio REST and FCM HTTP v1 adapters selected by environment; sandbox default | Adapter configuration validation and outbox delivery tests |
+| Transactional outbox, attempts and backoff | Domain-transaction inserts; leased delivery rows; capped exponential schedule | Claim/delivery/terminal failure integration tests |
+| Celery retry and dead letters | `ReliableBillingTask` automatic jittered backoff and `task_dead_letters` terminal envelope | Celery configuration assertions and model/migration checks |
+| PostgreSQL atomic claiming | `FOR UPDATE SKIP LOCKED` for outbox, payment retries, watchdog, polling and escalation | PostgreSQL dialect compilation assertion |
+| Pending timeout and gateway reconciliation | Watchdog, polling adapter, normalized signed event path, `payment_reconciliations` | Timeout → success → incident resolution test |
+| Live dashboard updates | Durable `realtime_billing_events`, authenticated resumable SSE, React `EventSource` refresh | API event assertions, Vite build and browser E2E |
+| Preferences and escalation | Per-customer channels, targets, event filter, quiet hours, timezone, retry cap and timed rules | Preference/multi-channel and escalation tests; operator UI |
+| Delivery receipts | Independent HMAC secret, provider/event replay constraint, monotonic state timestamps | Signed accepted/replayed receipt test |
+| Prometheus, Sentry and queue alerts | `/metrics`, optional SDK init, queue gauges/counters and threshold incident job | Metrics endpoint and queue-health tests |
