@@ -1,6 +1,7 @@
 from functools import lru_cache
+from typing import Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,9 +15,13 @@ class Settings(BaseSettings):
     access_token_minutes: int = 60 * 12
     frontend_url: str = "http://localhost:5173"
     cors_origins: str = "http://localhost:5173"
+    auth_cookie_secure: bool | None = None
+    auth_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    auth_cookie_domain: str | None = None
     google_client_id: str | None = None
     google_client_secret: str | None = None
     google_redirect_uri: str = "http://localhost:8000/api/v1/auth/google/callback"
+    oauth_state_minutes: int = Field(default=10, ge=5, le=30)
     auto_create_schema: bool = True
     billing_webhook_secret: str = "change-this-billing-webhook-secret"
     notification_receipt_webhook_secret: str = "change-this-notification-receipt-secret"
@@ -56,9 +61,41 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    @model_validator(mode="after")
+    def validate_auth_configuration(self) -> Self:
+        if bool(self.google_client_id) != bool(self.google_client_secret):
+            raise ValueError("GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be configured together")
+        if self.auth_cookie_samesite == "none" and not self.secure_auth_cookies:
+            raise ValueError("AUTH_COOKIE_SAMESITE=none requires secure authentication cookies")
+        if self.environment.lower() == "production":
+            unsafe_secret = (
+                len(self.jwt_secret) < 32
+                or self.jwt_secret.startswith("change-this")
+                or self.jwt_secret.startswith("replace-with")
+            )
+            if unsafe_secret:
+                raise ValueError("Production JWT_SECRET must be a non-placeholder secret of at least 32 characters")
+            if not self.secure_auth_cookies:
+                raise ValueError("Production authentication cookies must be secure")
+            if not self.frontend_url.lower().startswith("https://"):
+                raise ValueError("Production FRONTEND_URL must use HTTPS")
+            if self.google_oauth_enabled and not self.google_redirect_uri.lower().startswith("https://"):
+                raise ValueError("Production GOOGLE_REDIRECT_URI must use HTTPS")
+        return self
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def secure_auth_cookies(self) -> bool:
+        if self.auth_cookie_secure is not None:
+            return self.auth_cookie_secure
+        return self.environment.lower() == "production"
+
+    @property
+    def google_oauth_enabled(self) -> bool:
+        return bool(self.google_client_id and self.google_client_secret and self.google_redirect_uri)
 
     @property
     def retry_schedule_days(self) -> list[int]:

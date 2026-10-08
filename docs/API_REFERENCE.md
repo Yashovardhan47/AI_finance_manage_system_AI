@@ -1,5 +1,21 @@
 # BillFlow API Reference
 
+## Authentication
+
+Base path: `/api/v1/auth`. Password and Google flows both issue a BillFlow access JWT. Browser sessions use an HTTP-only cookie; non-browser clients can send the returned token as `Authorization: Bearer <token>`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/register` | Create a password account, issue a JWT, and set the browser session cookie. |
+| `POST` | `/login` | Verify email/password and issue a fresh JWT session. |
+| `GET` | `/me` | Return the current user from either cookie or bearer authentication. |
+| `POST` | `/logout` | Remove the browser session cookie. |
+| `GET` | `/methods` | Report password availability and whether Google is configured. |
+| `GET` | `/google` | Start browser-bound Google authorization-code + PKCE authentication. |
+| `GET` | `/google/callback` | Verify state, exchange the code, validate the OpenID identity, and redirect to the frontend callback. |
+
+Google callback errors are returned to the frontend as stable codes such as `invalid_oauth_state`, `google_access_denied`, `google_token_exchange_failed`, `google_identity_invalid`, and `google_account_conflict`. The Google credential is used only to establish identity; downstream provider connections require their own explicit consent and credentials.
+
 ## Financial Operations OS
 
 Base path: `/api/v1/operations`. Every endpoint requires an authenticated session and scopes records to the current user.

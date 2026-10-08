@@ -9,9 +9,13 @@ const features = [
   { number: '04', title: 'You stay in control', text: 'Automation follows your reserve policy. UPI PIN, OTP and final authorization remain with you.' },
 ]
 
-export default function Landing({ onAuthenticated }) {
-  const [authOpen, setAuthOpen] = useState(false)
+export default function Landing({ onAuthenticated, authError = '', onAuthErrorDismissed }) {
+  const [authOpen, setAuthOpen] = useState(Boolean(authError))
   const [prompted, setPrompted] = useState(false)
+
+  useEffect(() => {
+    if (authError) setAuthOpen(true)
+  }, [authError])
 
   useEffect(() => {
     const showAtDepth = () => {
@@ -82,7 +86,12 @@ export default function Landing({ onAuthenticated }) {
       </section>
 
       <footer><Brand /><p>Explainable finance intelligence. Human-authorized payments.</p><span>© 2026 BillFlow AI</span></footer>
-      <AuthModal open={authOpen} onClose={() => setAuthOpen(false)} onAuthenticated={onAuthenticated} />
+      <AuthModal
+        open={authOpen}
+        onClose={() => { setAuthOpen(false); onAuthErrorDismissed?.() }}
+        onAuthenticated={onAuthenticated}
+        initialError={authError}
+      />
     </div>
   )
 }

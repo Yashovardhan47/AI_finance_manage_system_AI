@@ -6,9 +6,9 @@
 |---|---|---|
 | Python compile | `python -m compileall -q app` | Import and syntax safety. |
 | Database migration | `DATABASE_URL=sqlite:///./migration-smoke.db alembic upgrade head` | Clean-schema reproducibility. |
-| Backend integration | `pytest -q` | Auth, personal finance, billing/Financial Operations, gateway security, retries, outbox claiming/backoff, delivery receipts, payment timeout/polling/reconciliation, incident escalation, metrics and tenancy. |
+| Backend integration | `pytest -q` | Password/JWT and Google OAuth security, personal finance, billing/Financial Operations, gateway security, retries, outbox claiming/backoff, delivery receipts, payment timeout/polling/reconciliation, incident escalation, metrics and tenancy. |
 | Frontend production build | `npm run build` | JSX, CSS, Recharts, lazy route, and optimized bundle compilation. |
-| Browser E2E | `npm run test:e2e` | Two complete journeys: Billing Operations lifecycle and Financial Autopilot decision-to-outcome workflow. |
+| Browser E2E | `npm run test:e2e` | Password registration/login/logout, OAuth recovery UI, Billing Operations lifecycle, and Financial Autopilot decision-to-outcome workflow. |
 | Load test | Locust command below | Concurrent authenticated operational reads and tenant setup. |
 
 ## Backend
@@ -56,6 +56,9 @@ Each virtual operator registers an isolated tenant and seeds its own determinist
 
 ## Manual acceptance checklist
 
+- Password registration and login both establish an HTTP-only JWT cookie; the returned bearer token independently authenticates `/auth/me`.
+- Logout clears the browser session, Google PKCE/state/nonce validation succeeds, cancellation recovers cleanly, and a state copied to another browser is rejected.
+- A verified Google identity cannot replace an account already bound to a different Google subject.
 - Invalid lifecycle transitions return a readable `409` and leave state unchanged.
 - Repeating a cycle, usage key, payment key, or gateway event does not duplicate financial state.
 - Repeating obligation bootstrap or action approval does not duplicate obligations or action requests.

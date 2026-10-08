@@ -178,15 +178,19 @@ The measured local Locust profile and its limits are recorded in [`docs/PERFORMA
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) — explicit production boundaries
 - [`docs/BillFlow_AI_Final_Presentation.pptx`](docs/BillFlow_AI_Final_Presentation.pptx) — final 12-slide project presentation
 
-## Google OAuth
+## JWT and Google authentication
 
-Create a Google OAuth **Web application** client and register this exact redirect URI:
+Email/password registration and login issue the same short-lived BillFlow JWT through two supported transports: an HTTP-only session cookie for the browser and the response body for API clients that use `Authorization: Bearer <token>`. The frontend never stores the bearer token. `POST /api/v1/auth/logout` removes the browser cookie, and `GET /api/v1/auth/methods` reports whether Google is enabled for the current deployment.
+
+For local Google sign-in, create a Google OAuth **Web application** client and register this exact authorized redirect URI:
 
 ```text
 http://localhost:8000/api/v1/auth/google/callback
 ```
 
-Then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`. Google identity is exchanged for BillFlow's own authenticated session; it does not grant access to unrelated financial providers.
+Then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in `backend/.env` (or the deployment secret store). A deployed client must register the exact HTTPS API callback. The authorization-code flow uses PKCE, a browser-bound signed state, an OpenID nonce, verified-email enforcement, and conflict-safe account linking. Provider cancellation and validation failures return to `/auth/callback` with readable recovery UI.
+
+Google identity is exchanged for BillFlow's own JWT session. It does not grant access to bank, biller, subscription, or unrelated financial-provider accounts.
 
 ## Production boundaries
 
