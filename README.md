@@ -137,7 +137,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`, register, and choose **Load secure demo data** on the dashboard. Open **Browse apps** to compare plans and inspect the personalized recommendation, or **Connected apps** to inspect imported provider states. Choosing a subscription creates a bill; paying it from **Bills & pay** activates the exact sandbox plan and records its provider confirmation.
+Open `http://localhost:5173` to inspect the public main interface and its complete platform map without signing in. Registration, password login, or a successful Google callback enters the separate private Home at `/home`; signing out returns to `/`. From Home, choose **Load secure demo data**, open **Browse apps** to compare plans and inspect the personalized recommendation, or use **Connected apps** to inspect imported provider states. Choosing a subscription creates a bill; paying it from **Bills & pay** activates the exact sandbox plan and records its provider confirmation.
 
 Open **Billing operations** and choose **Load realistic demo data** to inspect the complete recurring-billing scenario: catalog, customer accounts, lifecycle controls, invoices and PDFs, payment failure/recovery, tax summaries, analytics and audit evidence. The **Incidents & alerts** tab exposes live queue health, payment incidents, delivery attempts, signed receipts, gateway reconciliation, and per-customer notification/escalation rules.
 
@@ -190,7 +190,7 @@ http://localhost:8000/api/v1/auth/google/callback
 
 Then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in `backend/.env` (or the deployment secret store). A deployed client must register the exact HTTPS API callback. The authorization-code flow uses PKCE, a browser-bound signed state, an OpenID nonce, verified-email enforcement, and conflict-safe account linking. Provider cancellation and validation failures return to `/auth/callback` with readable recovery UI.
 
-Google identity is exchanged for BillFlow's own JWT session. It does not grant access to bank, biller, subscription, or unrelated financial-provider accounts.
+Google identity is exchanged for BillFlow's own JWT session and a successful callback resolves to the same `/home` experience as password login. It does not grant access to bank, biller, subscription, or unrelated financial-provider accounts.
 
 ## Production boundaries
 

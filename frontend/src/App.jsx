@@ -7,7 +7,7 @@ import BrowseApps from './pages/BrowseApps'
 import Connections from './pages/Connections'
 import Intelligence from './pages/Intelligence'
 import Landing from './pages/Landing'
-import Overview from './pages/Overview'
+import Home from './pages/Home'
 
 const BillingOperations = lazy(() => import('./pages/BillingOperations'))
 const FinancialOperations = lazy(() => import('./pages/FinancialOperations'))
@@ -15,7 +15,7 @@ const FinancialOperations = lazy(() => import('./pages/FinancialOperations'))
 export default function App() {
   const [user, setUser] = useState(null)
   const [checking, setChecking] = useState(true)
-  const [page, setPage] = useState('overview')
+  const [page, setPage] = useState('home')
   const [authError, setAuthError] = useState('')
   useEffect(() => {
     const isCallback = window.location.pathname === '/auth/callback'
@@ -23,20 +23,32 @@ export default function App() {
     const callbackFailed = isCallback && params.get('status') === 'error'
     if (callbackFailed) setAuthError(oauthErrorMessage(params.get('error')))
     api('/auth/me')
-      .then(setUser)
+      .then((value) => {
+        setUser(value)
+        setPage('home')
+        window.history.replaceState({}, '', '/home')
+      })
       .catch(() => {
         if (isCallback && !callbackFailed) setAuthError('Google sign-in completed without a valid BillFlow session. Please try again.')
+        window.history.replaceState({}, '', '/')
       })
-      .finally(() => {
-        if (isCallback) window.history.replaceState({}, '', '/')
-        setChecking(false)
-      })
+      .finally(() => setChecking(false))
   }, [])
-  const authenticated = (value) => { setAuthError(''); setUser(value) }
-  const logout = async () => { await api('/auth/logout', { method: 'POST' }); setUser(null); setPage('overview') }
+  const authenticated = (value) => {
+    setAuthError('')
+    setUser(value)
+    setPage('home')
+    window.history.replaceState({}, '', '/home')
+  }
+  const logout = async () => {
+    await api('/auth/logout', { method: 'POST' })
+    setUser(null)
+    setPage('home')
+    window.history.replaceState({}, '', '/')
+  }
   if (checking) return <div className="boot-screen"><span className="brand-mark">B</span><i /></div>
   if (!user) return <Landing onAuthenticated={authenticated} authError={authError} onAuthErrorDismissed={() => setAuthError('')} />
-  const pages = { overview: <Overview user={user} onNavigate={setPage} />, autopilot: <Suspense fallback={<div className="page"><div className="skeleton large-skeleton" /></div>}><FinancialOperations /></Suspense>, browse: <BrowseApps onNavigate={setPage} />, bills: <Bills />, billing: <Suspense fallback={<div className="page"><div className="skeleton large-skeleton" /></div>}><BillingOperations /></Suspense>, connections: <Connections />, intelligence: <Intelligence />, activity: <Activity /> }
+  const pages = { home: <Home user={user} onNavigate={setPage} />, autopilot: <Suspense fallback={<div className="page"><div className="skeleton large-skeleton" /></div>}><FinancialOperations /></Suspense>, browse: <BrowseApps onNavigate={setPage} />, bills: <Bills />, billing: <Suspense fallback={<div className="page"><div className="skeleton large-skeleton" /></div>}><BillingOperations /></Suspense>, connections: <Connections />, intelligence: <Intelligence />, activity: <Activity /> }
   return <AppShell user={user} page={page} setPage={setPage} onLogout={logout}>{pages[page]}</AppShell>
 }
 

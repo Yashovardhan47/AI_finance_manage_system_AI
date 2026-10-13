@@ -5,13 +5,14 @@ test('operator completes the billing lifecycle workspace', async ({ page }) => {
   page.on('pageerror', (error) => browserErrors.push(error.message))
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Open your workspace' }).click()
+  await page.getByRole('button', { name: 'Sign in / create account' }).click()
   await page.getByLabel('Full name').fill('Billing E2E Operator')
   await page.getByLabel('Email address').fill(`billing-e2e-${Date.now()}@example.com`)
   await page.getByLabel('Password').fill('SecurePass123')
   await page.getByRole('button', { name: 'Create account' }).click()
 
-  await expect(page.getByText('Personal finance OS')).toBeVisible()
+  await expect(page).toHaveURL('http://localhost:4173/home')
+  await expect(page.getByText('Your financial home')).toBeVisible()
   await page.getByRole('button', { name: /Billing ops/ }).click()
   await expect(page.getByRole('heading', { name: 'Billing operations' })).toBeVisible()
   await page.getByRole('button', { name: 'Load live demo' }).click()
