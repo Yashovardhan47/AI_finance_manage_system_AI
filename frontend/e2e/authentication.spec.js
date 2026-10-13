@@ -13,7 +13,7 @@ test('password registration, JWT session, logout, and login work end to end', as
   await page.getByLabel('Full name').fill('Authentication E2E User')
   await page.getByLabel('Email address').fill(email)
   await page.getByLabel('Password').fill('SecurePass123')
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
   await expect(page).toHaveURL('http://localhost:4173/home')
   await expect(page.getByText('Personal financial Home')).toBeVisible()
   await expect(page.getByText(email)).toBeVisible()

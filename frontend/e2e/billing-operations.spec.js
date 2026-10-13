@@ -9,7 +9,7 @@ test('operator completes the billing lifecycle workspace', async ({ page }) => {
   await page.getByLabel('Full name').fill('Billing E2E Operator')
   await page.getByLabel('Email address').fill(`billing-e2e-${Date.now()}@example.com`)
   await page.getByLabel('Password').fill('SecurePass123')
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
 
   await expect(page).toHaveURL('http://localhost:4173/home')
   await expect(page.getByText('Your financial home')).toBeVisible()

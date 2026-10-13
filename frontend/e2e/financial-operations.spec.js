@@ -9,7 +9,7 @@ test('user completes the financial decision-to-outcome workflow', async ({ page 
   await page.getByLabel('Full name').fill('Financial Operations E2E User')
   await page.getByLabel('Email address').fill(`financial-ops-e2e-${Date.now()}@example.com`)
   await page.getByLabel('Password').fill('SecurePass123')
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
   await expect(page).toHaveURL('http://localhost:4173/home')
 
   await page.getByRole('button', { name: /Autopilot/ }).click()
