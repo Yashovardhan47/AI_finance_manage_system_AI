@@ -11,6 +11,7 @@ from app.billing_models import (
     BillingSubscription,
     InvoiceLineType,
     InvoiceStatus,
+    NotificationPreference,
     SubscriptionStatus,
     TaxRate,
 )
@@ -49,6 +50,28 @@ def seed_billing_demo(db: Session, *, owner_user_id: int) -> dict:
     ]
     db.add(tax)
     db.add_all(plans + customers)
+    db.flush()
+    db.add_all(
+        [
+            NotificationPreference(
+                owner_user_id=owner_user_id,
+                customer_id=customer.id,
+                email_address=customer.email,
+                sms_enabled=index == 2,
+                push_enabled=index == 2,
+                phone_number="+15550001003" if index == 2 else None,
+                push_token="demo-fcm-device-token-orbit" if index == 2 else None,
+                quiet_hours_start="22:00",
+                quiet_hours_end="07:00",
+                timezone_name="Asia/Kolkata",
+                escalation_rules=[
+                    {"after_minutes": 5, "channels": ["email"]},
+                    {"after_minutes": 15, "channels": ["sms", "push"]},
+                ],
+            )
+            for index, customer in enumerate(customers)
+        ]
+    )
     db.flush()
 
     active = create_subscription(db, owner_user_id=owner_user_id, customer=customers[0], plan=plans[1], quantity=1, start_trial=False, start_at=now)

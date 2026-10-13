@@ -5,11 +5,12 @@ test('user completes the financial decision-to-outcome workflow', async ({ page 
   page.on('pageerror', (error) => browserErrors.push(error.message))
 
   await page.goto('/')
-  await page.getByRole('button', { name: 'Open your workspace' }).click()
+  await page.getByRole('button', { name: 'Sign in / create account' }).click()
   await page.getByLabel('Full name').fill('Financial Operations E2E User')
   await page.getByLabel('Email address').fill(`financial-ops-e2e-${Date.now()}@example.com`)
   await page.getByLabel('Password').fill('SecurePass123')
-  await page.getByRole('button', { name: 'Create account' }).click()
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+  await expect(page).toHaveURL('http://localhost:4173/home')
 
   await page.getByRole('button', { name: /Autopilot/ }).click()
   await expect(page.getByRole('heading', { name: 'Financial Autopilot' })).toBeVisible()

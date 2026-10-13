@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.router import api_router
 from app.core.config import get_settings
 from app.database import Base, engine
+from app.monitoring import configure_monitoring
 
 
 settings = get_settings()
@@ -34,6 +35,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+configure_monitoring(app, settings)
 app.include_router(api_router, prefix=settings.api_prefix)
 
 

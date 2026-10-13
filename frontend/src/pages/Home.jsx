@@ -2,7 +2,14 @@ import { useEffect, useState } from 'react'
 import ForecastChart from '../components/ForecastChart'
 import { api, formatDate, formatMoney } from '../lib/api'
 
-export default function Overview({ user, onNavigate }) {
+const quickActions = [
+  { page: 'bills', icon: '▣', label: 'Bills & pay', text: 'Review deadlines and authorize a payment' },
+  { page: 'browse', icon: '◎', label: 'Browse apps', text: 'Compare plans before you subscribe' },
+  { page: 'intelligence', icon: '✦', label: 'SafePay plan', text: 'Inspect AI recommendations and evidence' },
+  { page: 'billing', icon: '!', label: 'Payment incidents', text: 'Monitor progress, failures and escalation' },
+]
+
+export default function Home({ user, onNavigate }) {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
@@ -34,8 +41,14 @@ export default function Overview({ user, onNavigate }) {
   const hasData = summary.active_accounts > 0
 
   return (
-    <div className="page overview-page">
-      <div className="page-title"><div><span className="eyebrow">Friday financial briefing</span><h1>Good morning, {user.full_name.split(' ')[0]}.</h1><p>Here is what your money needs from you today.</p></div>{!hasData && <button className="button primary" onClick={seed}>Load secure demo data</button>}</div>
+    <div className="page home-page">
+      <div className="page-title home-title"><div><span className="eyebrow">Personal financial Home</span><h1>Good morning, {user.full_name.split(' ')[0]}.</h1><p>Your balances, deadlines, recommendations and payment operations begin here.</p></div>{!hasData && <button className="button primary" onClick={seed}>Load secure demo data</button>}</div>
+      <section className="home-command-center" aria-label="Home shortcuts">
+        <div className="home-command-intro"><span>Do next</span><strong>Move from insight to action.</strong><small>Every workflow remains reviewable and user-authorized.</small></div>
+        <div className="home-action-grid">
+          {quickActions.map((action) => <button key={action.page} type="button" onClick={() => onNavigate(action.page)}><span>{action.icon}</span><div><b>{action.label}</b><small>{action.text}</small></div><em>→</em></button>)}
+        </div>
+      </section>
       {message && <div className="notice">{message}</div>}
       <div className="metric-grid">
         <Metric label="Available balance" value={formatMoney(summary.total_balance)} meta={`${summary.active_accounts} money accounts · ${summary.connected_providers} provider apps`} tone="mint" />

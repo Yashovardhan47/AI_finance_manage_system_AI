@@ -1,11 +1,22 @@
-import { useState } from 'react'
-import { api } from '../lib/api'
+import { useEffect, useState } from 'react'
+import { api, googleAuthUrl } from '../lib/api'
 
-export default function AuthModal({ open, onClose, onAuthenticated }) {
+export default function AuthModal({ open, onClose, onAuthenticated, initialError = '' }) {
   const [mode, setMode] = useState('register')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [methods, setMethods] = useState(null)
   const [form, setForm] = useState({ full_name: '', email: '', password: '', monthly_income: 65000, minimum_balance: 10000 })
+
+  useEffect(() => {
+    if (!open) return undefined
+    let active = true
+    setError(initialError)
+    api('/auth/methods')
+      .then((value) => { if (active) setMethods(value) })
+      .catch(() => { if (active) setMethods({ password: true, google: false }) })
+    return () => { active = false }
+  }, [open, initialError])
 
   if (!open) return null
 
@@ -36,8 +47,8 @@ export default function AuthModal({ open, onClose, onAuthenticated }) {
         <h2>{mode === 'register' ? 'Create your secure workspace' : 'Welcome back'}</h2>
         <p className="muted">AI guidance stays explainable. Payments always require your authorization.</p>
         <div className="auth-tabs">
-          <button className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>Register</button>
-          <button className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>Log in</button>
+          <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => { setMode('register'); setError('') }}>Register</button>
+          <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => { setMode('login'); setError('') }}>Log in</button>
         </div>
         <form onSubmit={submit} className="auth-form">
           {mode === 'register' && (
@@ -55,7 +66,10 @@ export default function AuthModal({ open, onClose, onAuthenticated }) {
           <button className="button primary full" disabled={busy}>{busy ? 'Please wait…' : mode === 'register' ? 'Create account' : 'Log in'}</button>
         </form>
         <div className="divider"><span>or</span></div>
-        <a className="button google full" href="http://localhost:8000/api/v1/auth/google">Continue with Google</a>
+        <button type="button" className="button google full" disabled={!methods?.google || busy} onClick={() => window.location.assign(googleAuthUrl())}>
+          {methods === null ? 'Checking Google sign-in…' : methods.google ? 'Continue with Google' : 'Google sign-in not configured'}
+        </button>
+        {methods && !methods.google && <small className="auth-provider-note">Add the Google OAuth client values in the backend environment to enable this option.</small>}
       </div>
     </div>
   )

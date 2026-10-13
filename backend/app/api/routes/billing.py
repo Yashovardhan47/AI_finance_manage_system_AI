@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -13,6 +16,11 @@ from app.billing_models import (
     BillingCustomer,
     BillingInvoice,
     BillingNotification,
+    NotificationPreference,
+    NotificationReceipt,
+    PaymentIncident,
+    PaymentReconciliation,
+    RealtimeBillingEvent,
     BillingPlan,
     BillingRefund,
     BillingSubscription,
@@ -28,6 +36,8 @@ from app.billing_schemas import (
     CycleRunRequest,
     GatewayWebhookPayload,
     MockChargeRequest,
+    NotificationPreferenceUpdate,
+    NotificationReceiptPayload,
     PauseRequest,
     PlanChangeRequest,
     PlanCreate,
@@ -41,7 +51,7 @@ from app.billing_schemas import (
 )
 from app.core.config import get_settings
 from app.core.security import get_current_user
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import AuditLog, User
 from app.services.audit import write_audit
 from app.services.billing_demo import seed_billing_demo
@@ -55,6 +65,9 @@ from app.services.billing_engine import (
 )
 from app.services.billing_utils import utcnow
 from app.services.invoicing import ensure_invoice_pdf, process_due_billing_cycles
+from app.services.notification_receipts import process_notification_receipt, verify_notification_receipt
+from app.services.payment_incidents import acknowledge_incident, queue_health_snapshot, resolve_incident
+from app.services.realtime import publish_billing_event
 from app.services.subscription_state import InvalidSubscriptionTransition, status_timeline
 from app.services.subscriptions import (
     cancel_subscription,
@@ -478,6 +491,259 @@ def dashboard(
     return billing_dashboard(db, owner_user_id=user.id, months=months)
 
 
+@router.get("/notification-preferences")
+def list_notification_preferences(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    items = list(
+        db.scalars(
+            select(NotificationPreference)
+            .where(NotificationPreference.owner_user_id == user.id)
+            .order_by(NotificationPreference.customer_id)
+        )
+    )
+    return [_preference_dict(item) for item in items]
+
+
+@router.put("/notification-preferences/{customer_id}")
+def update_notification_preference(
+    customer_id: int,
+    payload: NotificationPreferenceUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    customer = _owned_customer(db, user.id, customer_id)
+    if bool(payload.quiet_hours_start) != bool(payload.quiet_hours_end):
+        raise HTTPException(status_code=422, detail="Quiet hours require both a start and an end")
+    try:
+        ZoneInfo(payload.timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=422, detail="Unknown IANA timezone") from exc
+    item = db.scalar(
+        select(NotificationPreference).where(
+            NotificationPreference.owner_user_id == user.id,
+            NotificationPreference.customer_id == customer_id,
+        )
+    )
+    if payload.sms_enabled and not (payload.phone_number or (item and item.phone_number)):
+        raise HTTPException(status_code=422, detail="A phone number is required when SMS is enabled")
+    if payload.push_enabled and not (payload.push_token or (item and item.push_token)):
+        raise HTTPException(status_code=422, detail="A push token is required when push is enabled")
+    values = payload.model_dump(mode="json")
+    values["email_address"] = values["email_address"] or customer.email
+    if item and not values["phone_number"]:
+        values["phone_number"] = item.phone_number
+    if item and not values["push_token"]:
+        values["push_token"] = item.push_token
+    values["escalation_rules"] = [rule.model_dump(mode="json") for rule in payload.escalation_rules]
+    if item is None:
+        item = NotificationPreference(owner_user_id=user.id, customer_id=customer_id, **values)
+        db.add(item)
+    else:
+        for key, value in values.items():
+            setattr(item, key, value)
+    db.flush()
+    publish_billing_event(
+        db,
+        owner_user_id=user.id,
+        event_type="notification.preference_updated",
+        entity_type="notification_preference",
+        entity_id=item.id,
+        payload={"customer_id": customer_id},
+    )
+    write_audit(
+        db,
+        user_id=user.id,
+        action="billing.notification_preference.updated",
+        entity_type="billing_customer",
+        entity_id=customer_id,
+        detail={"customer_id": customer_id, "channels": _enabled_channels(item)},
+    )
+    db.commit()
+    return _preference_dict(item)
+
+
+@router.get("/incidents")
+def list_incidents(
+    incident_status: str | None = Query(default=None, alias="status"),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    query = select(PaymentIncident).where(PaymentIncident.owner_user_id == user.id)
+    if incident_status:
+        query = query.where(PaymentIncident.status == incident_status)
+    items = db.scalars(query.order_by(PaymentIncident.created_at.desc()).limit(200))
+    return [_incident_dict(item) for item in items]
+
+
+@router.post("/incidents/{incident_id}/acknowledge")
+def acknowledge_payment_incident(
+    incident_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> dict:
+    incident = _owned_incident(db, user.id, incident_id)
+    acknowledge_incident(db, incident)
+    write_audit(
+        db,
+        user_id=user.id,
+        action="billing.incident.acknowledged",
+        entity_type="payment_incident",
+        entity_id=incident.id,
+        detail={"customer_id": incident.customer_id, "invoice_id": incident.invoice_id},
+    )
+    db.commit()
+    return _incident_dict(incident)
+
+
+@router.post("/incidents/{incident_id}/resolve")
+def resolve_payment_incident(
+    incident_id: int, user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> dict:
+    incident = _owned_incident(db, user.id, incident_id)
+    resolve_incident(db, incident)
+    write_audit(
+        db,
+        user_id=user.id,
+        action="billing.incident.resolved",
+        entity_type="payment_incident",
+        entity_id=incident.id,
+        detail={"customer_id": incident.customer_id, "invoice_id": incident.invoice_id},
+    )
+    db.commit()
+    return _incident_dict(incident)
+
+
+@router.get("/queue-health")
+def get_queue_health(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> dict:
+    return queue_health_snapshot(db, owner_user_id=user.id)
+
+
+@router.get("/reconciliations")
+def list_reconciliations(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    items = db.scalars(
+        select(PaymentReconciliation)
+        .where(PaymentReconciliation.owner_user_id == user.id)
+        .order_by(PaymentReconciliation.checked_at.desc())
+        .limit(200)
+    )
+    return [
+        {
+            "id": item.id,
+            "payment_id": item.payment_id,
+            "provider_check_id": item.provider_check_id,
+            "previous_status": item.previous_status,
+            "provider_status": item.provider_status,
+            "resolved_status": item.resolved_status,
+            "provider_payload": item.provider_payload,
+            "checked_at": item.checked_at.isoformat(),
+        }
+        for item in items
+    ]
+
+
+@router.get("/notification-receipts")
+def list_notification_receipts(
+    user: User = Depends(get_current_user), db: Session = Depends(get_db)
+) -> list[dict]:
+    items = db.execute(
+        select(NotificationReceipt, BillingNotification)
+        .join(BillingNotification, NotificationReceipt.notification_id == BillingNotification.id)
+        .where(BillingNotification.owner_user_id == user.id)
+        .order_by(NotificationReceipt.received_at.desc())
+        .limit(200)
+    ).all()
+    return [
+        {
+            "id": receipt.id,
+            "notification_id": receipt.notification_id,
+            "event_type": notification.event_type,
+            "provider": receipt.provider,
+            "provider_message_id": receipt.provider_message_id,
+            "status": receipt.delivery_status,
+            "occurred_at": receipt.occurred_at.isoformat(),
+            "received_at": receipt.received_at.isoformat(),
+        }
+        for receipt, notification in items
+    ]
+
+
+@router.post("/webhooks/notification-receipts/{provider}")
+def notification_receipt_webhook(
+    provider: str,
+    payload: NotificationReceiptPayload,
+    x_billflow_signature: str | None = Header(default=None, alias="X-BillFlow-Signature"),
+    db: Session = Depends(get_db),
+) -> dict:
+    signed_payload = payload.model_dump(mode="json")
+    if not verify_notification_receipt(
+        signed_payload, x_billflow_signature or "", settings.notification_receipt_webhook_secret
+    ):
+        raise HTTPException(status_code=400, detail="Invalid notification receipt signature")
+    try:
+        return process_notification_receipt(db, provider=provider, payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/events")
+def recent_billing_events(
+    after: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=500),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    events = db.scalars(
+        select(RealtimeBillingEvent)
+        .where(RealtimeBillingEvent.owner_user_id == user.id, RealtimeBillingEvent.id > after)
+        .order_by(RealtimeBillingEvent.id)
+        .limit(limit)
+    )
+    return [_event_dict(event) for event in events]
+
+
+@router.get("/events/stream")
+async def billing_event_stream(
+    request: Request,
+    after: int = Query(default=0, ge=0),
+    last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    cursor = max(after, int(last_event_id) if last_event_id and last_event_id.isdigit() else 0)
+    owner_user_id = user.id
+
+    async def stream():
+        nonlocal cursor
+        heartbeat = 0
+        while not await request.is_disconnected():
+            with SessionLocal() as event_db:
+                events = list(
+                    event_db.scalars(
+                        select(RealtimeBillingEvent)
+                        .where(
+                            RealtimeBillingEvent.owner_user_id == owner_user_id,
+                            RealtimeBillingEvent.id > cursor,
+                        )
+                        .order_by(RealtimeBillingEvent.id)
+                        .limit(100)
+                    )
+                )
+                serialized = [_event_dict(event) for event in events]
+            for event in serialized:
+                cursor = event["id"]
+                yield f"id: {event['id']}\nevent: billing\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+            heartbeat += 1
+            if not serialized and heartbeat % 15 == 0:
+                yield ": keep-alive\n\n"
+            await asyncio.sleep(1)
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
 @router.get("/notifications")
 def notifications(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> list[dict]:
     items = db.scalars(
@@ -486,7 +752,7 @@ def notifications(user: User = Depends(get_current_user), db: Session = Depends(
         .order_by(BillingNotification.created_at.desc())
         .limit(100)
     )
-    return [{"id": item.id, "customer_id": item.customer_id, "invoice_id": item.invoice_id, "event_type": item.event_type, "recipient": item.recipient, "channel": item.channel, "status": item.status.value, "payload": item.payload, "failure_reason": item.failure_reason, "sent_at": item.sent_at.isoformat() if item.sent_at else None, "created_at": item.created_at.isoformat()} for item in items]
+    return [_notification_dict(item) for item in items]
 
 
 @router.get("/audit")
@@ -559,6 +825,18 @@ def _owned_invoice(db: Session, owner_user_id: int, invoice_id: int) -> BillingI
     return invoice
 
 
+def _owned_incident(db: Session, owner_user_id: int, incident_id: int) -> PaymentIncident:
+    incident = db.scalar(
+        select(PaymentIncident).where(
+            PaymentIncident.id == incident_id,
+            PaymentIncident.owner_user_id == owner_user_id,
+        )
+    )
+    if not incident:
+        raise HTTPException(status_code=404, detail="Payment incident not found")
+    return incident
+
+
 def _plan_dict(item: BillingPlan) -> dict:
     return {"id": item.id, "code": item.code, "name": item.name, "description": item.description, "price": float(item.price), "currency": item.currency, "billing_interval": item.billing_interval.value, "feature_entitlements": item.feature_entitlements, "trial_days": item.trial_days, "is_archived": item.is_archived, "archived_at": item.archived_at.isoformat() if item.archived_at else None, "created_at": item.created_at.isoformat(), "updated_at": item.updated_at.isoformat()}
 
@@ -591,3 +869,93 @@ def _refund_dict(item: BillingRefund) -> dict:
 
 def _tax_rate_dict(item: TaxRate) -> dict:
     return {"id": item.id, "name": item.name, "country_code": item.country_code, "region": item.region, "rate_percent": float(item.rate_percent), "is_active": item.is_active, "effective_from": item.effective_from.isoformat(), "effective_to": item.effective_to.isoformat() if item.effective_to else None, "created_at": item.created_at.isoformat()}
+
+
+def _preference_dict(item: NotificationPreference) -> dict:
+    return {
+        "id": item.id,
+        "customer_id": item.customer_id,
+        "email_enabled": item.email_enabled,
+        "sms_enabled": item.sms_enabled,
+        "push_enabled": item.push_enabled,
+        "email_address": item.email_address,
+        "phone_number": item.phone_number,
+        "push_token_configured": bool(item.push_token),
+        "event_types": item.event_types,
+        "quiet_hours_start": item.quiet_hours_start,
+        "quiet_hours_end": item.quiet_hours_end,
+        "timezone_name": item.timezone_name,
+        "escalation_rules": item.escalation_rules,
+        "max_delivery_attempts": item.max_delivery_attempts,
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+
+def _incident_dict(item: PaymentIncident) -> dict:
+    return {
+        "id": item.id,
+        "customer_id": item.customer_id,
+        "subscription_id": item.subscription_id,
+        "invoice_id": item.invoice_id,
+        "payment_id": item.payment_id,
+        "incident_type": item.incident_type,
+        "severity": item.severity,
+        "status": item.status,
+        "summary": item.summary,
+        "details": item.details,
+        "escalation_level": item.escalation_level,
+        "next_escalation_at": item.next_escalation_at.isoformat() if item.next_escalation_at else None,
+        "first_detected_at": item.first_detected_at.isoformat(),
+        "last_observed_at": item.last_observed_at.isoformat(),
+        "acknowledged_at": item.acknowledged_at.isoformat() if item.acknowledged_at else None,
+        "resolved_at": item.resolved_at.isoformat() if item.resolved_at else None,
+    }
+
+
+def _notification_dict(item: BillingNotification) -> dict:
+    return {
+        "id": item.id,
+        "customer_id": item.customer_id,
+        "invoice_id": item.invoice_id,
+        "event_type": item.event_type,
+        "recipient": item.recipient,
+        "channel": item.channel,
+        "status": item.status.value,
+        "delivery_status": item.delivery_status,
+        "attempt_count": item.attempt_count,
+        "max_attempts": item.max_attempts,
+        "next_attempt_at": item.next_attempt_at.isoformat(),
+        "provider": item.provider,
+        "provider_message_id": item.provider_message_id,
+        "escalation_level": item.escalation_level,
+        "payload": item.payload,
+        "failure_reason": item.failure_reason,
+        "sent_at": item.sent_at.isoformat() if item.sent_at else None,
+        "delivered_at": item.delivered_at.isoformat() if item.delivered_at else None,
+        "opened_at": item.opened_at.isoformat() if item.opened_at else None,
+        "failed_at": item.failed_at.isoformat() if item.failed_at else None,
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _event_dict(item: RealtimeBillingEvent) -> dict:
+    return {
+        "id": item.id,
+        "event_type": item.event_type,
+        "entity_type": item.entity_type,
+        "entity_id": item.entity_id,
+        "payload": item.payload,
+        "created_at": item.created_at.isoformat(),
+    }
+
+
+def _enabled_channels(item: NotificationPreference) -> list[str]:
+    return [
+        channel
+        for channel, enabled in (
+            ("email", item.email_enabled),
+            ("sms", item.sms_enabled),
+            ("push", item.push_enabled),
+        )
+        if enabled
+    ]

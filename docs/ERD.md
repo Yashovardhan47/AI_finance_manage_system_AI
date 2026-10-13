@@ -18,6 +18,11 @@ erDiagram
     BILLING_INVOICES ||--o{ PAYMENT_RETRIES : recovers
     BILLING_INVOICES ||--o{ BILLING_REFUNDS : refunds
     BILLING_CUSTOMERS ||--o{ BILLING_NOTIFICATIONS : receives
+    BILLING_CUSTOMERS ||--o| NOTIFICATION_PREFERENCES : configures
+    BILLING_NOTIFICATIONS ||--o{ NOTIFICATION_RECEIPTS : proves
+    BILLING_PAYMENTS ||--o{ PAYMENT_RECONCILIATIONS : checks
+    BILLING_PAYMENTS o|--o{ PAYMENT_INCIDENTS : raises
+    USERS ||--o{ REALTIME_BILLING_EVENTS : receives
     USERS ||--o{ TAX_RATES : configures
     USERS ||--o{ BILLING_WEBHOOK_EVENTS : verifies
 
@@ -71,6 +76,9 @@ erDiagram
         string gateway_event_id UK
         string idempotency_key UK
         int attempt_number
+        string processing_state
+        string provider_status
+        datetime next_status_check_at
     }
     PAYMENT_RETRIES {
         int id PK
@@ -78,6 +86,31 @@ erDiagram
         int attempt_number UK
         datetime scheduled_for
         enum status
+    }
+    BILLING_NOTIFICATIONS {
+        int id PK
+        string channel
+        string delivery_status
+        int attempt_count
+        datetime next_attempt_at
+        string provider_message_id
+        datetime dead_lettered_at
+    }
+    PAYMENT_INCIDENTS {
+        int id PK
+        int payment_id FK
+        string incident_type
+        string severity
+        string status
+        int escalation_level
+        datetime next_escalation_at
+    }
+    NOTIFICATION_RECEIPTS {
+        int id PK
+        int notification_id FK
+        string event_id UK
+        string delivery_status
+        datetime occurred_at
     }
 ```
 

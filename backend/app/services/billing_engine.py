@@ -36,6 +36,8 @@ from app.services.audit import write_audit
 from app.services.billing_notifications import queue_billing_notification
 from app.services.billing_utils import add_billing_period, as_utc, money, period_fraction_remaining, utcnow
 from app.services.invoicing import create_invoice
+from app.services.payment_incidents import open_payment_incident, resolve_invoice_incidents
+from app.services.realtime import publish_billing_event
 from app.services.subscription_state import InvalidSubscriptionTransition, transition_subscription
 
 
@@ -127,6 +129,9 @@ def process_gateway_event(
     now = utcnow()
     if event_type == "payment.paid":
         payment.status = BillingPaymentStatus.succeeded
+        payment.processing_state = "succeeded"
+        payment.provider_status = "succeeded"
+        payment.reconciled_at = now
         payment.processed_at = now
         payment.failure_code = None
         payment.failure_reason = None
@@ -156,9 +161,13 @@ def process_gateway_event(
             invoice=invoice,
             payload={"invoice_number": invoice.invoice_number, "amount": str(amount)},
         )
+        resolve_invoice_incidents(db, owner_user_id=owner_user_id, invoice_id=invoice.id, at=now)
         action = "billing.payment.received"
     elif event_type == "payment.failed":
         payment.status = BillingPaymentStatus.failed
+        payment.processing_state = "failed"
+        payment.provider_status = "failed"
+        payment.reconciled_at = now
         payment.processed_at = now
         payment.failure_code = payload.get("failure_code") or "mock_declined"
         payment.failure_reason = payload.get("failure_reason") or "Mock gateway declined the payment"
@@ -180,9 +189,31 @@ def process_gateway_event(
                 "next_retry": _next_retry_iso(invoice.retries),
             },
         )
+        open_payment_incident(
+            db,
+            owner_user_id=owner_user_id,
+            customer_id=invoice.customer_id,
+            subscription_id=invoice.subscription_id,
+            invoice_id=invoice.id,
+            payment_id=payment.id,
+            incident_type="payment_failed",
+            severity="critical" if payment.attempt_number else "warning",
+            summary=f"Payment failed for {invoice.invoice_number}",
+            details={
+                "failure_code": payment.failure_code,
+                "failure_reason": payment.failure_reason,
+                "attempt_number": payment.attempt_number,
+                "next_retry": _next_retry_iso(invoice.retries),
+            },
+            dedupe_key=f"invoice:{invoice.id}:payment_failure",
+            now=now,
+        )
         action = "billing.payment.failed"
     elif event_type == "payment.refunded":
         payment.status = BillingPaymentStatus.refunded
+        payment.processing_state = "refunded"
+        payment.provider_status = "refunded"
+        payment.reconciled_at = now
         payment.processed_at = now
         invoice.amount_refunded = money(Decimal(invoice.amount_refunded) + amount)
         invoice.status = InvoiceStatus.refunded if invoice.amount_refunded >= invoice.amount_paid else InvoiceStatus.partially_refunded
@@ -203,6 +234,19 @@ def process_gateway_event(
 
     event.status = "processed"
     event.processed_at = now
+    publish_billing_event(
+        db,
+        owner_user_id=owner_user_id,
+        event_type=event_type,
+        entity_type="billing_payment",
+        entity_id=payment.id,
+        payload={
+            "invoice_id": invoice.id,
+            "invoice_status": invoice.status.value,
+            "payment_status": payment.status.value,
+            "subscription_status": invoice.subscription.status.value,
+        },
+    )
     write_audit(
         db,
         user_id=owner_user_id,
@@ -295,26 +339,42 @@ def run_due_retries(
         )
         .where(PaymentRetry.status == RetryStatus.queued, PaymentRetry.scheduled_for <= now)
         .order_by(PaymentRetry.scheduled_for, PaymentRetry.attempt_number)
+        .with_for_update(skip_locked=True)
+        .limit(100)
     )
     if owner_user_id is not None:
         query = query.where(PaymentRetry.owner_user_id == owner_user_id)
     retries = list(db.scalars(query))
-    results: list[dict] = []
     for retry in retries:
+        retry.status = RetryStatus.processing
+    db.commit()
+    results: list[dict] = []
+    for index, retry in enumerate(retries):
         if retry.invoice.status == InvoiceStatus.paid:
             retry.status = RetryStatus.cancelled
+            db.commit()
             continue
-        retry.status = RetryStatus.processing
-        result = simulate_gateway_charge(
-            db,
-            invoice=retry.invoice,
-            idempotency_key=f"retry:{retry.id}:{retry.attempt_number}",
-            outcome=forced_outcome,
-            attempt_number=retry.attempt_number,
-            settings=settings,
-        )
-        results.append(result)
-    db.commit()
+        try:
+            result = simulate_gateway_charge(
+                db,
+                invoice=retry.invoice,
+                idempotency_key=f"retry:{retry.id}:{retry.attempt_number}",
+                outcome=forced_outcome,
+                attempt_number=retry.attempt_number,
+                settings=settings,
+            )
+            results.append(result)
+            db.commit()
+        except Exception as exc:
+            db.rollback()
+            remaining_ids = [item.id for item in retries[index:]]
+            remaining = list(db.scalars(select(PaymentRetry).where(PaymentRetry.id.in_(remaining_ids))))
+            for item in remaining:
+                if item.status == RetryStatus.processing:
+                    item.status = RetryStatus.queued
+                    item.last_error = f"Worker failure; released for Celery retry: {exc}"[:2000]
+            db.commit()
+            raise
     return {"processed": len(results), "results": results, "as_of": now.isoformat()}
 
 

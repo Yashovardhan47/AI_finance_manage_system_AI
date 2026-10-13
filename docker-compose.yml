@@ -27,14 +27,24 @@ services:
   backend:
     build: ./backend
     environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: postgresql+psycopg://billflow:billflow_dev@postgres:5432/billflow
-      JWT_SECRET: local-docker-secret-change-before-deployment
-      FRONTEND_URL: http://localhost:5173
-      CORS_ORIGINS: http://localhost:5173
+      JWT_SECRET: ${JWT_SECRET:-local-docker-secret-change-before-deployment}
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
+      AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-http://localhost:8000/api/v1/auth/google/callback}
+      OAUTH_STATE_MINUTES: ${OAUTH_STATE_MINUTES:-10}
       AUTO_CREATE_SCHEMA: "false"
       BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      NOTIFICATION_RECEIPT_WEBHOOK_SECRET: local-receipt-secret-change-before-deployment
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      SENTRY_DSN: ${SENTRY_DSN:-}
     ports:
       - "8000:8000"
     healthcheck:
@@ -55,9 +65,30 @@ services:
       DATABASE_URL: postgresql+psycopg://billflow:billflow_dev@postgres:5432/billflow
       JWT_SECRET: local-docker-secret-change-before-deployment
       BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      NOTIFICATION_RECEIPT_WEBHOOK_SECRET: local-receipt-secret-change-before-deployment
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       AUTO_CREATE_SCHEMA: "false"
+      PENDING_PAYMENT_TIMEOUT_SECONDS: ${PENDING_PAYMENT_TIMEOUT_SECONDS:-900}
+      GATEWAY_POLL_INTERVAL_SECONDS: ${GATEWAY_POLL_INTERVAL_SECONDS:-60}
+      GATEWAY_STATUS_BASE_URL: ${GATEWAY_STATUS_BASE_URL:-}
+      GATEWAY_STATUS_TOKEN: ${GATEWAY_STATUS_TOKEN:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-sandbox}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM_EMAIL: ${SMTP_FROM_EMAIL:-notifications@billflow.local}
+      SMS_PROVIDER: ${SMS_PROVIDER:-sandbox}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:-}
+      PUSH_PROVIDER: ${PUSH_PROVIDER:-sandbox}
+      FCM_PROJECT_ID: ${FCM_PROJECT_ID:-}
+      FCM_SERVICE_ACCOUNT_JSON: ${FCM_SERVICE_ACCOUNT_JSON:-}
+      QUEUE_BACKLOG_ALERT_THRESHOLD: ${QUEUE_BACKLOG_ALERT_THRESHOLD:-250}
+      QUEUE_OLDEST_ALERT_SECONDS: ${QUEUE_OLDEST_ALERT_SECONDS:-900}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     depends_on:
       backend:
         condition: service_healthy
@@ -71,6 +102,7 @@ services:
       DATABASE_URL: postgresql+psycopg://billflow:billflow_dev@postgres:5432/billflow
       JWT_SECRET: local-docker-secret-change-before-deployment
       BILLING_WEBHOOK_SECRET: local-webhook-secret-change-before-deployment
+      NOTIFICATION_RECEIPT_WEBHOOK_SECRET: local-receipt-secret-change-before-deployment
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
       AUTO_CREATE_SCHEMA: "false"

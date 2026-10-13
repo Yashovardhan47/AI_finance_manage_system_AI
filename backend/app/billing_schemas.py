@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
@@ -204,6 +204,40 @@ class CycleRunRequest(BaseModel):
 class RetryRunRequest(BaseModel):
     as_of: datetime | None = None
     forced_outcome: Literal["success", "failure"] | None = None
+
+
+class EscalationRule(BaseModel):
+    after_minutes: int = Field(ge=1, le=10080)
+    channels: list[Literal["email", "sms", "push"]] = Field(min_length=1)
+
+
+class NotificationPreferenceUpdate(BaseModel):
+    email_enabled: bool = True
+    sms_enabled: bool = False
+    push_enabled: bool = False
+    email_address: EmailStr | None = None
+    phone_number: str | None = Field(default=None, min_length=7, max_length=40)
+    push_token: str | None = Field(default=None, min_length=8, max_length=4096)
+    event_types: list[str] = Field(default_factory=lambda: ["*"], min_length=1, max_length=100)
+    quiet_hours_start: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    quiet_hours_end: str | None = Field(default=None, pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    timezone_name: str = Field(default="UTC", min_length=1, max_length=80)
+    escalation_rules: list[EscalationRule] = Field(
+        default_factory=lambda: [
+            EscalationRule(after_minutes=5, channels=["email"]),
+            EscalationRule(after_minutes=15, channels=["sms", "push"]),
+        ],
+        max_length=10,
+    )
+    max_delivery_attempts: int = Field(default=5, ge=1, le=20)
+
+
+class NotificationReceiptPayload(BaseModel):
+    event_id: str = Field(min_length=8, max_length=180)
+    provider_message_id: str = Field(min_length=3, max_length=180)
+    status: Literal["queued", "sent", "delivered", "opened", "failed"]
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    metadata: dict = Field(default_factory=dict)
 
 
 class DashboardRange(BaseModel):

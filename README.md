@@ -53,7 +53,12 @@ The research direction is an **Explainable Multi-Objective Payment Orchestration
 - Country/region tax rules, branded persisted invoice PDFs and bounded refunds
 - Signed mock-gateway webhooks with replay protection and day 1/3/7 payment recovery
 - MRR, churn, conversion, revenue, invoice-status and recovery analytics in a responsive Recharts dashboard
-- Customer-scoped audit history and durable notification outbox
+- Real-time payment incident center with pending-payment watchdogs, gateway polling, reconciliation evidence and operator acknowledgement/resolution
+- Transactional notification outbox with PostgreSQL `FOR UPDATE SKIP LOCKED` claims, leases, attempt counts and exponential backoff
+- SMTP email, Twilio SMS and Firebase Cloud Messaging adapters, with an explicit deterministic sandbox default
+- Signed delivery receipts for queued, sent, delivered, opened and failed states; customer channel, quiet-hours and escalation preferences
+- Celery automatic task retries, database-backed dead letters, queue-health alerts and durable SSE dashboard updates
+- Prometheus metrics and optional Sentry error/tracing integration
 - PostgreSQL schema managed by Alembic, Redis-backed Celery worker and Beat schedules, plus SQLite for instant development
 - Deterministic demo portfolios, OpenAPI documentation, integration tests, browser E2E coverage and a Locust profile
 
@@ -67,10 +72,13 @@ flowchart TB
     API --> OPS[Financial Operations OS]
     OPS --> AI
     OPS --> CON
-    API --> BILL[Billing engine]
+    API --> BILL[Billing + incident engine]
+    API --> SSE[Durable SSE stream]
     BILL --> GATE[Signed gateway events]
     BILL --> PDF[Invoice PDF engine]
-    BEAT[Celery Beat] --> REDIS[(Redis)] --> WORKER[Celery worker]
+    BEAT[Celery Beat] --> REDIS[(Redis)] --> WORKER[Celery workers]
+    WORKER --> OUT[Transactional outbox]
+    OUT --> MSG[SMTP · Twilio · FCM]
     WORKER --> DB
     API --> CON[Provider connectors]
 ```
@@ -129,9 +137,9 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`, register, and choose **Load secure demo data** on the dashboard. Open **Browse apps** to compare plans and inspect the personalized recommendation, or **Connected apps** to inspect imported provider states. Choosing a subscription creates a bill; paying it from **Bills & pay** activates the exact sandbox plan and records its provider confirmation.
+Open `http://localhost:5173` to inspect the public main interface and its complete platform map without signing in. Registration, password login, or a successful Google callback enters the separate private Home at `/home`; signing out returns to `/`. From Home, choose **Load secure demo data**, open **Browse apps** to compare plans and inspect the personalized recommendation, or use **Connected apps** to inspect imported provider states. Choosing a subscription creates a bill; paying it from **Bills & pay** activates the exact sandbox plan and records its provider confirmation.
 
-Open **Billing operations** and choose **Load realistic demo data** to inspect the complete recurring-billing scenario: catalog, customer accounts, lifecycle controls, invoices and PDFs, payment failure/recovery, tax summaries, analytics and audit evidence.
+Open **Billing operations** and choose **Load realistic demo data** to inspect the complete recurring-billing scenario: catalog, customer accounts, lifecycle controls, invoices and PDFs, payment failure/recovery, tax summaries, analytics and audit evidence. The **Incidents & alerts** tab exposes live queue health, payment incidents, delivery attempts, signed receipts, gateway reconciliation, and per-customer notification/escalation rules.
 
 ### Docker alternative
 
@@ -164,26 +172,31 @@ The measured local Locust profile and its limits are recorded in [`docs/PERFORMA
 - [`docs/FINANCIAL_OPERATIONS_OS.md`](docs/FINANCIAL_OPERATIONS_OS.md) — obligation, policy, approval, outcome, exception, and consent design
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and [`docs/ERD.md`](docs/ERD.md) — runtime design and billing data model
 - [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) — billing endpoint guide; interactive OpenAPI remains at `/docs`
+- [`docs/REALTIME_INCIDENT_ENGINE.md`](docs/REALTIME_INCIDENT_ENGINE.md) — outbox, adapters, retries, receipts, SSE, incident escalation and monitoring runbook
 - [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) and [`docs/TESTING.md`](docs/TESTING.md) — operating and verification procedures
 - [`docs/DEMO_SCRIPT.md`](docs/DEMO_SCRIPT.md) — end-to-end walkthrough
 - [`docs/KNOWN_LIMITATIONS.md`](docs/KNOWN_LIMITATIONS.md) — explicit production boundaries
 - [`docs/BillFlow_AI_Final_Presentation.pptx`](docs/BillFlow_AI_Final_Presentation.pptx) — final 12-slide project presentation
 
-## Google OAuth
+## JWT and Google authentication
 
-Create a Google OAuth **Web application** client and register this exact redirect URI:
+Email/password registration and login issue the same short-lived BillFlow JWT through two supported transports: an HTTP-only session cookie for the browser and the response body for API clients that use `Authorization: Bearer <token>`. The frontend never stores the bearer token. `POST /api/v1/auth/logout` removes the browser cookie, and `GET /api/v1/auth/methods` reports whether Google is enabled for the current deployment.
+
+For local Google sign-in, create a Google OAuth **Web application** client and register this exact authorized redirect URI:
 
 ```text
 http://localhost:8000/api/v1/auth/google/callback
 ```
 
-Then set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`. Google identity is exchanged for BillFlow's own authenticated session; it does not grant access to unrelated financial providers.
+Then set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI` in `backend/.env` (or the deployment secret store). A deployed client must register the exact HTTPS API callback. The authorization-code flow uses PKCE, a browser-bound signed state, an OpenID nonce, verified-email enforcement, and conflict-safe account linking. Provider cancellation and validation failures return to `/auth/callback` with readable recovery UI.
+
+Google identity is exchanged for BillFlow's own JWT session and a successful callback resolves to the same `/home` experience as password login. It does not grant access to bank, biller, subscription, or unrelated financial-provider accounts.
 
 ## Production boundaries
 
-The repository implements migrations, renewal/retry schedules, signed-webhook verification, reconciliation records and a durable notification outbox. Its payment gateway and connected providers remain deterministic sandboxes: no codebase can create the commercial or regulatory authority needed to move real money or edit arbitrary third-party accounts.
+The repository implements migrations, renewal/retry schedules, signed-webhook verification, gateway polling, reconciliation records, a transactional notification outbox, SMTP/Twilio/FCM adapters, signed delivery receipts, incident escalation, Prometheus metrics and optional Sentry reporting. Provider and payment adapters remain sandboxed until their corresponding production configuration is explicitly supplied; no codebase can create the commercial or regulatory authority needed to move real money or edit arbitrary third-party accounts.
 
-A production launch still requires a licensed payment or Bharat Connect partner, commercial/API agreements for supported services, provider OAuth consent, KMS-backed token encryption, organization RBAC and approval controls, notification delivery vendors, rate limiting, secrets management, observability, backups/disaster recovery, privacy and retention controls, regulatory review, and deployment-specific TLS/cookie hardening. Providers without a supported API require a user-assisted handoff or must remain local-only.
+A production launch still requires a licensed payment or Bharat Connect partner, commercial/API agreements for supported services, provider OAuth consent, KMS-backed token encryption, organization RBAC and approval controls, provisioned notification-vendor accounts and verified sender identities, rate limiting, managed secrets, alert routing and SLO ownership, backups/disaster recovery, privacy and retention controls, regulatory review, and deployment-specific TLS/cookie hardening. Providers without a supported API require a user-assisted handoff or must remain local-only.
 
 ## License
 

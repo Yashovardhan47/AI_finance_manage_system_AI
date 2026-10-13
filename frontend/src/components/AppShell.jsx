@@ -1,7 +1,7 @@
 import Brand from './Brand'
 
 const navItems = [
-  ['overview', '⌂', 'Overview'],
+  ['home', '⌂', 'Home'],
   ['autopilot', '◇', 'Autopilot'],
   ['browse', '◎', 'Browse apps'],
   ['bills', '▣', 'Bills & pay'],
@@ -31,7 +31,7 @@ export default function AppShell({ user, page, setPage, onLogout, children }) {
       </aside>
       <main className="main-panel">
         <header className="app-header">
-          <div><span className="mobile-brand"><Brand compact /></span><span className="header-kicker">Personal finance OS</span></div>
+          <div><span className="mobile-brand"><Brand compact /></span><span className="header-kicker">Your financial home</span></div>
           <div className="user-chip"><span>{user.full_name?.[0]?.toUpperCase()}</span><div><b>{user.full_name}</b><small>{user.email}</small></div></div>
         </header>
         {children}
